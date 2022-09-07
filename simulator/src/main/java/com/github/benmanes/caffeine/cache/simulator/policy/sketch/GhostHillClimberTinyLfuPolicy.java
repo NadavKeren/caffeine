@@ -301,13 +301,13 @@ public class GhostHillClimberTinyLfuPolicy implements Policy {
         }
 
         @Override
-        public double avergePenalty() {
-            return mainStats.avergePenalty();
+        public double averagePenalty() {
+            return mainStats.averagePenalty();
         }
 
         @Override
-        public double avergeHitPenalty() {
-            return mainStats.avergeHitPenalty();
+        public double averageHitPenalty() {
+            return mainStats.averageHitPenalty();
         }
 
         @Override

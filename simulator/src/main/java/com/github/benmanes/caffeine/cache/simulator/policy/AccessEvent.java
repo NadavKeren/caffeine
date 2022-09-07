@@ -53,10 +53,21 @@ public class AccessEvent {
     return 0;
   }
 
+  /** Return the real cost of missing this entry */
+  public double estimatedCost() { return 0; }
+
+  /** Returns the delta of the penalties for this entry*/
+  public double delta() {
+    double eventMP = this.estimatedCost();
+    double eventHP = this.hitPenalty();
+    return eventMP - eventHP;
+  }
   /** Returns if the trace supplies the hit/miss penalty for this entry. */
   public boolean isPenaltyAware() {
     return false;
   }
+
+  public void updateHitPenalty(double hitPenalty) {}
 
   @Override
   public boolean equals(Object o) {
@@ -99,7 +110,11 @@ public class AccessEvent {
 
   /** Returns an event for the given key and penalties. */
   public static AccessEvent forKeyAndPenalties(long key, double hitPenalty, double missPenalty) {
-    return new PenaltiesAccessEvent(key, hitPenalty, missPenalty);
+    return new PenaltiesAccessEvent(key, hitPenalty, missPenalty, missPenalty);
+  }
+
+  public static AccessEvent forKeyPenaltiesAndEstimatedCost(long key, double hitPenalty, double missPenalty, double estimatedMissCost) {
+    return new PenaltiesAccessEvent(key, hitPenalty, missPenalty, estimatedMissCost);
   }
 
   private static final class WeightedAccessEvent extends AccessEvent {
@@ -117,14 +132,22 @@ public class AccessEvent {
 
   private static final class PenaltiesAccessEvent extends AccessEvent {
     private final double missPenalty;
-    private final double hitPenalty;
+    private final double estimatedMissCost;
+    private double hitPenalty;
 
-    PenaltiesAccessEvent(long key, double hitPenalty, double missPenalty) {
+    PenaltiesAccessEvent(long key, double hitPenalty, double missPenalty, double estimatedMissCost) {
       super(key);
       this.hitPenalty = hitPenalty;
       this.missPenalty = missPenalty;
+      this.estimatedMissCost = estimatedMissCost;
+      this.hitPenalty = hitPenalty;
       checkArgument(hitPenalty >= 0);
-      checkArgument(missPenalty >= hitPenalty);
+      checkArgument(estimatedMissCost >= 0);
+      checkArgument(missPenalty >= 0);
+    }
+
+    @Override public void updateHitPenalty(double hitPenalty) {
+      this.hitPenalty = hitPenalty;
     }
     @Override public double missPenalty() {
       return missPenalty;
@@ -135,5 +158,6 @@ public class AccessEvent {
     @Override public boolean isPenaltyAware() {
       return true;
     }
+    @Override public double estimatedCost() { return this.estimatedMissCost; }
   }
 }

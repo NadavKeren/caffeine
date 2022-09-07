@@ -20,6 +20,7 @@ import static java.util.Locale.US;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toSet;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -76,6 +77,10 @@ public class BasicSettings {
     return new TinyLfuSettings();
   }
 
+  public CraSettings cra() {
+    return new CraSettings();
+  }
+
   public long maximumSize() {
     return config().getLong("maximum-size");
   }
@@ -115,6 +120,27 @@ public class BasicSettings {
     }
     public double fpp() {
       return config().getDouble("membership.fpp");
+    }
+  }
+
+  public final class CraSettings {
+    public Set<Integer> kValues(){
+      if(config().hasPath("cra.k")){
+        return new HashSet<>(config().getIntList("cra.k"));
+      }else{
+        Set<Integer> h = new HashSet<>();
+        h.add(1);
+        return h;
+      }
+    }
+    public Set<Integer> maxLists() {
+      if(config().hasPath("cra.max-lists")){
+        return new HashSet<>(config().getIntList("cra.max-lists"));
+      }else{
+        Set<Integer> h = new HashSet<>();
+        h.add(10);
+        return h;
+      }
     }
   }
 

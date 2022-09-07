@@ -74,6 +74,8 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.segment.S4Wind
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.tinycache.TinyCachePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.tinycache.TinyCacheWithGhostCachePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.tinycache.WindowTinyCachePolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowCAPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.AdaptiveCAPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.two_queue.TuQueuePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.two_queue.TwoQueuePolicy;
 import com.google.auto.value.AutoValue;
@@ -179,6 +181,7 @@ public final class Registry {
 
   private void registerSketch() {
     registerMany(WindowTinyLfuPolicy.class, WindowTinyLfuPolicy::policies);
+    registerMany(WindowCAPolicy.class, WindowCAPolicy::policies);
     registerMany(S4WindowTinyLfuPolicy.class, S4WindowTinyLfuPolicy::policies);
     registerMany(LruWindowTinyLfuPolicy.class, LruWindowTinyLfuPolicy::policies);
     registerMany(RandomWindowTinyLfuPolicy.class, RandomWindowTinyLfuPolicy::policies);
@@ -190,6 +193,7 @@ public final class Registry {
 
     registerMany(HillClimberWindowTinyLfuPolicy.class, HillClimberWindowTinyLfuPolicy::policies);
     registerMany(GhostHillClimberTinyLfuPolicy.class, GhostHillClimberTinyLfuPolicy::policies);
+    registerMany(AdaptiveCAPolicy.class, AdaptiveCAPolicy::policies);
 
     register(TinyCachePolicy.class, TinyCachePolicy::new);
     register(WindowTinyCachePolicy.class, WindowTinyCachePolicy::new);
