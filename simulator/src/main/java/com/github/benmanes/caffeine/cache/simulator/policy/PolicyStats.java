@@ -88,7 +88,7 @@ public class PolicyStats {
         .build());
     addPercentMetric("Adaption", this::percentAdaption);
     addMetric("Average Miss Penalty", this::averageMissPenalty);
-    addMetric("Average Penalty", this::avergePenalty);
+    addMetric("Average Penalty", this::averagePenalty);
     addMetric("Steps", this::operationCount);
     addMetric("Time", this::stopwatch);
   }
@@ -273,12 +273,12 @@ public class PolicyStats {
     return (requestCount == 0) ? 0.0 : (double) operationCount / requestCount;
   }
 
-  public double avergePenalty() {
+  public double averagePenalty() {
     long requestCount = requestCount();
     return (requestCount == 0) ? 0.0 : totalPenalty() / requestCount;
   }
 
-  public double avergeHitPenalty() {
+  public double averageHitPenalty() {
     return (hitCount == 0) ? 0.0 : hitPenalty / hitCount;
   }
 
@@ -292,7 +292,7 @@ public class PolicyStats {
   }
 
   @AutoValue @AutoBuilder
-  public abstract static class Metric {
+  public static abstract class Metric {
     public enum MetricType { NUMBER, PERCENT, OBJECT }
 
     public abstract String name();

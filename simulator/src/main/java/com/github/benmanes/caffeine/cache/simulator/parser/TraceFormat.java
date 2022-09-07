@@ -33,6 +33,8 @@ import com.github.benmanes.caffeine.cache.simulator.parser.cloud_physics.CloudPh
 import com.github.benmanes.caffeine.cache.simulator.parser.corda.CordaTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.gradle.GradleTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.kaggle.OutbrainTraceReader;
+import com.github.benmanes.caffeine.cache.simulator.parser.latency.LatencyTraceReader;
+import com.github.benmanes.caffeine.cache.simulator.parser.latency_with_oracle.LatencyWithOracleTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.lirs.LirsTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.lrb.LrbTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.scarab.ScarabTraceReader;
@@ -69,6 +71,8 @@ public enum TraceFormat {
   CLOUD_PHYSICS(CloudPhysicsTraceReader::new),
   CORDA(CordaTraceReader::new),
   GRADLE(GradleTraceReader::new),
+  LATENCY(LatencyTraceReader::new),
+  LATENCY_ORACLE(LatencyWithOracleTraceReader::new),
   LIRS(LirsTraceReader::new),
   LRB(LrbTraceReader::new),
   OUTBRAIN(OutbrainTraceReader::new),
