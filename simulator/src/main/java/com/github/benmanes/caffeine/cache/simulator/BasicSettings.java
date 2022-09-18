@@ -81,6 +81,10 @@ public class BasicSettings {
     return new CraSettings();
   }
 
+  public LatencyEstimationSettings latencyEstimationSettings() {
+    return new LatencyEstimationSettings();
+  }
+
   public long maximumSize() {
     return config().getLong("maximum-size");
   }
@@ -142,6 +146,14 @@ public class BasicSettings {
         return h;
       }
     }
+  }
+
+  public final class LatencyEstimationSettings {
+    public String estimationType() {
+      return config().getString("latency-estimation.strategy");
+    }
+    public int numOfBuckets() { return config().getInt("latency-estimation.number-of-buckets"); }
+    public double epsilon() { return config().getDouble("latency-estimation.epsilon"); }
   }
 
   public final class TinyLfuSettings {

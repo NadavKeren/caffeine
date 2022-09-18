@@ -17,6 +17,7 @@ package com.github.benmanes.caffeine.cache.simulator.policy.linked;
 
 
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
+import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.google.common.base.MoreObjects;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -47,8 +48,9 @@ public final class CraBlock {
   private int currOp;
   private long lastReset;
   private int currentSize;
+  private final LatencyEstimator<Long> latencyEstimator;
 
-  public CraBlock(double k, int maxLists, long maximumSize) {
+  public CraBlock(double k, int maxLists, long maximumSize, LatencyEstimator<Long> latencyEstimator) {
     this.maximumSize = maximumSize;
     this.activeLists = new HashSet<>();
     this.currOp = 1;
@@ -63,6 +65,7 @@ public final class CraBlock {
     this.reqCount = 0;
     this.currentSize = 0;
     this.k = k;
+    this.latencyEstimator = latencyEstimator;
   }
 
   public List<Long> record(AccessEvent event) {
@@ -93,7 +96,15 @@ public final class CraBlock {
   }
 
   private int findList(AccessEvent candidate) {
-    return candidate.delta() < 0 ? 0 : Math.max(1,Math.min((int) (((candidate.delta() - normalizationBias) / normalizationFactor) * (maxLists+1)),maxLists));
+    int listNum = 0;
+    double delta = latencyEstimator.getDelta(candidate.key());
+
+    if (delta < 0) {
+      int expectedListNum = (int) ((delta - normalizationBias) / normalizationFactor);
+      listNum = Math.max(1, Math.min(expectedListNum, maxLists));
+    }
+
+    return listNum;
   }
 
   /**
@@ -166,12 +177,14 @@ public final class CraBlock {
         continue;
       }
       Node currVictim = currSentinel.next;
-      currMaxDelta = Math.max(currVictim.event.delta(),currMaxDelta);
+      double currDelta = latencyEstimator.getLatencyEstimation(currVictim.event.key());
+      currMaxDelta = Math.max(currDelta, currMaxDelta);
+
       if (currVictim.lastTouch < lastReset) {
         currVictim.resetOp();
       }
 
-      rank = Math.signum(currVictim.event.delta()) * Math.pow(Math.abs(currVictim.event.delta()), Math.pow((double) currOp - currVictim.lastOp, -k));
+      rank = Math.signum(currDelta) * Math.pow(Math.abs(currDelta), Math.pow((double) currOp - currVictim.lastOp, -k));
       if (rank < minRank || victim == null || (rank == minRank
               && (double) currVictim.lastOp / currOp < (double) victim.lastOp / currOp)) {
         minRank = rank;
@@ -203,7 +216,7 @@ public final class CraBlock {
 
   List<Long> onAccess(Node node) {
     Node head = node.sentinel;
-    if (node.event.delta() < 0) {
+    if (latencyEstimator.getDelta(node.event.key()) < 0) {
       data.remove(node.key);
       long key = node.key;
       node.remove();
@@ -223,7 +236,7 @@ public final class CraBlock {
         node.sentinel = lists[index];
         lists[index].size += 1;
         node.moveToTail(currOp++);
-      }else{
+      } else {
         node.moveToTail(currOp++);
       }
       return new ArrayList<>();
