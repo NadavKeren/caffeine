@@ -34,7 +34,7 @@ import com.github.benmanes.caffeine.cache.simulator.parser.corda.CordaTraceReade
 import com.github.benmanes.caffeine.cache.simulator.parser.gradle.GradleTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.kaggle.OutbrainTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.latency.LatencyTraceReader;
-import com.github.benmanes.caffeine.cache.simulator.parser.latency_with_oracle.LatencyWithOracleTraceReader;
+import com.github.benmanes.caffeine.cache.simulator.parser.latency.LatencyWithOracleTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.lirs.LirsTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.lrb.LrbTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.scarab.ScarabTraceReader;

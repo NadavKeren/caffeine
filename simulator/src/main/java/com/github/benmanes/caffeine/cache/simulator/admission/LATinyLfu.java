@@ -25,7 +25,9 @@ import com.github.benmanes.caffeine.cache.simulator.admission.perfect.PerfectFre
 import com.github.benmanes.caffeine.cache.simulator.admission.table.RandomRemovalFrequencyTable;
 import com.github.benmanes.caffeine.cache.simulator.admission.tinycache.TinyCacheAdapter;
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
+import com.github.benmanes.caffeine.cache.simulator.policy.LatestValueEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
+import com.github.benmanes.caffeine.cache.simulator.policy.ValueEstimator;
 import com.typesafe.config.Config;
 
 /**
@@ -38,10 +40,12 @@ public final class LATinyLfu implements Admittor {
 
   private final PolicyStats policyStats;
   private final Frequency sketch;
+  private final ValueEstimator latencyEstimator;
 
   public LATinyLfu(Config config, PolicyStats policyStats) {
     this.policyStats = policyStats;
     this.sketch = makeSketch(config);
+    this.latencyEstimator = createEstimator(config);
   }
 
   private Frequency makeSketch(Config config) {
@@ -68,6 +72,22 @@ public final class LATinyLfu implements Admittor {
       return new PerfectFrequency(config);
     }
     throw new IllegalStateException("Unknown sketch type: " + type);
+  }
+
+  private ValueEstimator createEstimator(Config config) {
+    BasicSettings settings = new BasicSettings(config);
+    String estimationType = settings.latencyEstimationSettings().estimationType();
+
+    ValueEstimator estimator = null;
+    switch (estimationType) {
+      case "latest":
+        estimator = new LatestValueEstimator<Long, Double>();
+        break;
+      case "true-average":
+        break;
+    }
+
+    return estimator;
   }
 
   public int frequency(long key) {

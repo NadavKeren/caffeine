@@ -16,13 +16,15 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.BucketLatencyEstimation;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.BurstLatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
 import com.github.benmanes.caffeine.cache.simulator.admission.LATinyLfu;
-import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
-import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
-import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
+import com.github.benmanes.caffeine.cache.simulator.policy.*;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock.Node;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.LatestLatencyEstimator;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.TrueAverageEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.LAHillClimber.QueueType;
 import com.typesafe.config.Config;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
@@ -39,7 +41,7 @@ import static java.util.Locale.US;
 import static java.util.stream.Collectors.toSet;
 
 /**
- * The WindowLA algorithm where the size of the admission window is adjusted using the a latency
+ * The WindowLA algorithm where the size of the admission window is adjusted using the latency
  * aware hill climbing algorithm.
  *
  * @author himelbrand@gmail.com (Omri Himelbrand)
@@ -52,6 +54,7 @@ public final class AdaptiveCAPolicy implements Policy {
   private final Long2ObjectMap<Node> data;
   private final PolicyStats policyStats;
   private final LAHillClimber climber;
+  private final LatencyEstimator<Long> latencyEstimator;
   private final Admittor admittor;
   private final long maximumSize;
 
@@ -79,19 +82,19 @@ public final class AdaptiveCAPolicy implements Policy {
   public AdaptiveCAPolicy(
       LAHillClimberType strategy, double percentMain, AdaptiveCASettings settings,
       double k, int maxLists) {
-
+    this.latencyEstimator = createEstimator(settings.config());
     int maxMain = (int) (settings.maximumSize() * percentMain);
     this.maxProtected = (int) (maxMain * settings.percentMainProtected());
     this.maxWindow = settings.maximumSize() - maxMain;
     this.data = new Long2ObjectOpenHashMap<>();
     this.maximumSize = settings.maximumSize();
-    this.headProtected = new CraBlock(k, maxLists, this.maxProtected);
-    this.headProbation = new CraBlock(k, maxLists, maxMain - this.maxProtected);
-    this.headWindow = new CraBlock(k, maxLists, this.maxWindow);
+    this.headProtected = new CraBlock(k, maxLists, this.maxProtected, latencyEstimator);
+    this.headProbation = new CraBlock(k, maxLists, maxMain - this.maxProtected, latencyEstimator);
+    this.headWindow = new CraBlock(k, maxLists, this.maxWindow, latencyEstimator);
     this.initialPercentMain = percentMain;
     this.policyStats = new PolicyStats("CAHillClimberWindow (%s)(k=%.2f,maxLists=%d)",
             strategy.name().toLowerCase(US), k, maxLists);
-    this.admittor = new LATinyLfu(settings.config(), policyStats);
+    this.admittor = new LATinyLfu(settings.config(), policyStats, latencyEstimator);
     this.climber = strategy.create(settings.config());
     this.k = k;
     this.normalizationBias = 0;
@@ -101,6 +104,34 @@ public final class AdaptiveCAPolicy implements Policy {
     this.samplesCount = 0;
 
     printSegmentSizes();
+  }
+
+  private LatencyEstimator<Long> createEstimator(Config config) {
+    BasicSettings settings = new BasicSettings(config);
+    BasicSettings.LatencyEstimationSettings latencySettings = settings.latencyEstimationSettings();
+    String estimationType = latencySettings.estimationType();
+
+    LatencyEstimator<Long> estimator;
+    switch (estimationType) {
+      case "latest":
+        estimator = new LatestLatencyEstimator<>();
+        break;
+      case "latest-with-delayed-hits":
+        estimator = new BurstLatencyEstimator<>();
+        break;
+      case "true-average":
+        estimator = new TrueAverageEstimator<>();
+        break;
+      case "buckets":
+        estimator = new BucketLatencyEstimation<>(latencySettings.numOfBuckets(), latencySettings.epsilon());
+        break;
+      default:
+        throw new IllegalStateException("Unknown estimator type: " + estimationType);
+    }
+
+
+
+    return estimator;
   }
 
   /**
@@ -137,22 +168,26 @@ public final class AdaptiveCAPolicy implements Policy {
 
     QueueType queue = null;
     if (node == null) {
+      double delta = latencyEstimator.getDelta(event.key());
 
-      if (event.delta() > normalizationFactor){
-        samplesCount++;
-        maxDelta = (maxDelta*maxDeltaCounts + event.delta())/++maxDeltaCounts;
+      if (delta > normalizationFactor){
+        ++samplesCount;
+        ++maxDeltaCounts;
+
+        maxDelta = (maxDelta * maxDeltaCounts + delta) / maxDeltaCounts;
       }
-      normalizationBias = normalizationBias > 0 ? Math.min(normalizationBias,Math.max(0,event.delta())) : Math.max(0,event.delta());
-      if (samplesCount%1000 == 0 || normalizationFactor == 0){
-        normalizationFactor = maxDelta;
-        maxDeltaCounts = 1;
-        samplesCount = 0;
-      }
-      updateNormalization();
+
+      updateNormalization(delta);
       onMiss(event);
-      policyStats.recordMiss();
     } else {
-      node.event().updateHitPenalty(event.hitPenalty());
+      if (node.event().isAvailableAt(event.getArrivalTime())) {
+        node.event().updateHitPenalty(event.hitPenalty());
+        event.changeEventStatus(AccessEvent.EventStatus.HIT);
+      } else {
+        event.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+        event.setDelayedHitPenalty(node.event().getAvailabilityTime());
+      }
+
       if (headWindow.isHit(key)) {
         onWindowHit(node);
         policyStats.recordHit();
@@ -169,10 +204,21 @@ public final class AdaptiveCAPolicy implements Policy {
         throw new IllegalStateException();
       }
     }
+
     climb(event, queue, isFull);
   }
 
-  private void updateNormalization() {
+  private void updateNormalization(double delta) {
+    normalizationBias = normalizationBias > 0
+                      ? Math.min(normalizationBias, Math.max(0, delta))
+                      : Math.max(0, delta);
+
+    if (samplesCount % 1000 == 0 || normalizationFactor == 0){
+      normalizationFactor = maxDelta;
+      maxDeltaCounts = 1;
+      samplesCount = 0;
+    }
+
     headProtected.setNormalization(normalizationBias,normalizationFactor);
     headProbation.setNormalization(normalizationBias,normalizationFactor);
     headWindow.setNormalization(normalizationBias,normalizationFactor);
@@ -218,7 +264,7 @@ public final class AdaptiveCAPolicy implements Policy {
   }
 
   /**
-   * Moves the entry to the MRU position, if it falls outside of the fast-path threshold.
+   * Moves the entry to the MRU position, if it falls outside the fast-path threshold.
    */
   private void onProtectedHit(Node node) {
     node.moveToTail();

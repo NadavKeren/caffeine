@@ -81,9 +81,9 @@ public final class MiniSimClimber implements HillClimber {
     sample++;
 
     if (Math.floorMod(hasher.hashLong(key).asInt(), R) < 1) {
-      for (WindowTinyLfuPolicy policy : minis) {
-        policy.record(key);
-      }
+//      for (WindowTinyLfuPolicy policy : minis) {
+        // policy.record(key); TODO: nkeren: fix this
+//      }
     }
   }
 
