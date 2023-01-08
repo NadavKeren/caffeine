@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Omri Himelbrand. All Rights Reserved.
+ * Copyright 2020 Omri Himelbrand and Nadav Keren. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -97,9 +97,9 @@ public final class WindowCAPolicy implements Policy {
       case "latest":
         estimator = new LatestLatencyEstimator<>();
         break;
-      case "latest-with-delayed-hits":
-        estimator = new BurstLatencyEstimator<>();
-        break;
+//      case "latest-with-delayed-hits":
+//        estimator = new BurstLatencyEstimator<>();
+//        break;
       case "true-average":
         estimator = new TrueAverageEstimator<>();
         break;
@@ -255,12 +255,6 @@ public final class WindowCAPolicy implements Policy {
         latencyEstimator.addValueToRecord(event.key(), event.delayedHitPenalty());
       }
 
-      logger.log(Logger.Level.DEBUG, String.format("key: %d\tevent type: %s\tarrival time: %f\tavailability time: %f\tIs available: %b",
-                                                   event.key(),
-                                                   event.getStatus(),
-                                                   event.getArrivalTime(),
-                                                   node.event().getAvailabilityTime(),
-                                                   isAvailable));
       admittor.record(event.key());
 
       if (headWindow.isHit(key)) {

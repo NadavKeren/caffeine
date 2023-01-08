@@ -24,8 +24,8 @@ import java.util.Set;
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
 import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
 import com.github.benmanes.caffeine.cache.simulator.admission.TinyLfu;
+import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
-import com.github.benmanes.caffeine.cache.simulator.policy.Policy.KeyOnlyPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy.PolicySpec;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.google.common.base.MoreObjects;
@@ -53,7 +53,7 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  * @author ben.manes@gmail.com (Ben Manes)
  */
 @PolicySpec(name = "sketch.WindowTinyLfu")
-public class WindowTinyLfuPolicy implements KeyOnlyPolicy {
+public class WindowTinyLfuPolicy implements Policy {
   protected final Long2ObjectMap<Node> data;
   protected final PolicyStats policyStats;
   protected final Admittor admittor;
@@ -136,31 +136,46 @@ public class WindowTinyLfuPolicy implements KeyOnlyPolicy {
   }
 
   @Override
-  public void record(long key) {
+  public void record(AccessEvent event) {
+    final long key = event.key();
     policyStats.recordOperation();
     Node node = data.get(key);
     if (node == null) {
-      onMiss(key);
+      onMiss(event);
       policyStats.recordMiss();
-    } else if (node.status == Status.WINDOW) {
-      onWindowHit(node);
-      policyStats.recordHit();
-    } else if (node.status == Status.PROBATION) {
-      onProbationHit(node);
-      policyStats.recordHit();
-    } else if (node.status == Status.PROTECTED) {
-      onProtectedHit(node);
-      policyStats.recordHit();
+      policyStats.recordMissPenalty(event.missPenalty());
+      event.changeEventStatus(AccessEvent.EventStatus.MISS);
     } else {
-      throw new IllegalStateException();
+      if (node.status == Status.WINDOW) {
+        onWindowHit(node);
+      } else if (node.status == Status.PROBATION) {
+        onProbationHit(node);
+      } else if (node.status == Status.PROTECTED) {
+        onProtectedHit(node);
+      } else {
+        throw new IllegalStateException();
+      }
+
+      boolean isAvailable = node.event.isAvailableAt(event.getArrivalTime());
+      if (isAvailable) {
+        event.changeEventStatus(AccessEvent.EventStatus.HIT);
+        policyStats.recordHit();
+        policyStats.recordHitPenalty(event.hitPenalty());
+      } else {
+        event.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+        event.setDelayedHitPenalty(event.getAvailabilityTime());
+        policyStats.recordDelayedHitPenalty(event.delayedHitPenalty());
+        policyStats.recordDelayedHit();
+      }
     }
   }
 
   /** Adds the entry to the admission window, evicting if necessary. */
-  private void onMiss(long key) {
+  private void onMiss(AccessEvent event) {
+    long key = event.key();
     admittor.record(key);
 
-    Node node = new Node(key, Status.WINDOW);
+    Node node = new Node(key, Status.WINDOW, event);
     node.appendToTail(headWindow);
     data.put(key, node);
     sizeWindow++;
@@ -198,6 +213,9 @@ public class WindowTinyLfuPolicy implements KeyOnlyPolicy {
     admittor.record(node.key);
     node.moveToTail(headProtected);
   }
+
+  @Override
+  public boolean isPenaltyAware() { return true; }
 
   /**
    * Evicts from the admission window into the probation space. If the size exceeds the maximum,
@@ -256,6 +274,7 @@ public class WindowTinyLfuPolicy implements KeyOnlyPolicy {
     Status status = Status.NONE;
     Node prev = null;
     Node next = null;
+    AccessEvent event = null;
 
     /** Creates a new sentinel node. */
     public Node() {
@@ -265,9 +284,10 @@ public class WindowTinyLfuPolicy implements KeyOnlyPolicy {
     }
 
     /** Creates a new, unlinked node. */
-    public Node(long key, Status status) {
+    public Node(long key, Status status, AccessEvent event) {
       this.status = status;
       this.key = key;
+      this.event = event;
     }
 
     public void moveToTail(Node head) {

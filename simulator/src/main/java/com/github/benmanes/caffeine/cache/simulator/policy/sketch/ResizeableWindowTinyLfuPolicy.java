@@ -85,7 +85,7 @@ public class ResizeableWindowTinyLfuPolicy extends WindowTinyLfuPolicy {
         Node node = originSentinel.prev;
         int items = 0;
         while (node != originSentinel) {
-            Node copy = new Node(node.key, listType);
+            Node copy = new Node(node.key, listType, node.event);
             copy.appendToTail(copySentinel);
             node = node.prev;
             ++items;
@@ -329,9 +329,6 @@ public class ResizeableWindowTinyLfuPolicy extends WindowTinyLfuPolicy {
         public PolicyStats stats() {
             return super.stats();
         }
-
-        @Override
-        public void record(long key) {}
 
         @Override
         public void finished() {}

@@ -24,10 +24,7 @@ import com.github.benmanes.caffeine.cache.simulator.admission.countmin64.CountMi
 import com.github.benmanes.caffeine.cache.simulator.admission.perfect.PerfectFrequency;
 import com.github.benmanes.caffeine.cache.simulator.admission.table.RandomRemovalFrequencyTable;
 import com.github.benmanes.caffeine.cache.simulator.admission.tinycache.TinyCacheAdapter;
-import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
-import com.github.benmanes.caffeine.cache.simulator.policy.LatestValueEstimator;
-import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
-import com.github.benmanes.caffeine.cache.simulator.policy.ValueEstimator;
+import com.github.benmanes.caffeine.cache.simulator.policy.*;
 import com.typesafe.config.Config;
 
 /**
@@ -40,12 +37,17 @@ public final class LATinyLfu implements Admittor {
 
   private final PolicyStats policyStats;
   private final Frequency sketch;
-  private final ValueEstimator latencyEstimator;
+  private LatencyEstimator<Long> latencyEstimator;
 
-  public LATinyLfu(Config config, PolicyStats policyStats) {
+  @Override
+  public void record(long key) {
+    Admittor.super.record(key);
+  }
+
+  public LATinyLfu(Config config, PolicyStats policyStats, LatencyEstimator<Long> latencyEstimator) {
     this.policyStats = policyStats;
     this.sketch = makeSketch(config);
-    this.latencyEstimator = createEstimator(config);
+    this.latencyEstimator = latencyEstimator;
   }
 
   private Frequency makeSketch(Config config) {
@@ -74,22 +76,6 @@ public final class LATinyLfu implements Admittor {
     throw new IllegalStateException("Unknown sketch type: " + type);
   }
 
-  private ValueEstimator createEstimator(Config config) {
-    BasicSettings settings = new BasicSettings(config);
-    String estimationType = settings.latencyEstimationSettings().estimationType();
-
-    ValueEstimator estimator = null;
-    switch (estimationType) {
-      case "latest":
-        estimator = new LatestValueEstimator<Long, Double>();
-        break;
-      case "true-average":
-        break;
-    }
-
-    return estimator;
-  }
-
   public int frequency(long key) {
     return sketch.frequency(key);
   }
@@ -104,15 +90,23 @@ public final class LATinyLfu implements Admittor {
     sketch.reportMiss();
     long candidateKey = candidate.key();
     long victimKey = victim.key();
-    long candidateFreq = sketch.frequency(candidateKey);
-    long victimFreq = sketch.frequency(victimKey);
-    double candidateDelta = candidate.delta();
-    double victimDelta = victim.delta();
-    if (candidateDelta * candidateFreq > victimDelta * victimFreq) {
+
+    double candidateScore = getScore(candidateKey);
+    double victimScore = getScore(victimKey);
+    boolean shouldAdmit = candidateScore > victimScore;
+    if (shouldAdmit) {
       policyStats.recordAdmission();
-      return true;
+    } else {
+      policyStats.recordRejection();
     }
-    policyStats.recordRejection();
-    return false;
+
+    return shouldAdmit;
+  }
+
+  private double getScore(long key) {
+    long freq = sketch.frequency(key);
+    double latencyDelta = latencyEstimator.getLatencyEstimation(key) - latencyEstimator.getCacheHitEstimation();
+
+    return freq * latencyDelta;
   }
 }
