@@ -61,6 +61,9 @@ public class PolicyStats {
   private long rejectedCount;
   private long operationCount;
   private double percentAdaption;
+  private double windowPercentage;
+  private double squareWindowPercentage;
+  private int adaptionNumber;
 
   @SuppressWarnings("AnnotateFormatMethod")
   public PolicyStats(String format, Object... args) {
@@ -90,6 +93,8 @@ public class PolicyStats {
         .name("Weighted Hit Rate")
         .type(PERCENT)
         .build());
+    addMetric(Metric.of("Average Window Size", (DoubleSupplier) this::averageWindowSize, NUMBER, true));
+    addMetric(Metric.of("Window Size Variance", (DoubleSupplier) this::windowSizeVariance, NUMBER, true));
     addPercentMetric("Adaption", this::percentAdaption);
     addMetric("Average Miss Penalty", this::averageMissPenalty);
     addMetric("Average Penalty", this::averagePenalty);
@@ -232,6 +237,11 @@ public class PolicyStats {
   public void recordAdmission() {
     admittedCount++;
   }
+  public void recordAdaption(double windowSizePercentage) {
+    this.windowPercentage += windowSizePercentage;
+    this.squareWindowPercentage += (windowSizePercentage * windowSizePercentage);
+    ++this.adaptionNumber;
+  }
 
   public long rejectionCount() {
     return rejectedCount;
@@ -276,6 +286,21 @@ public class PolicyStats {
   public double weightedMissRate() {
     long requestsWeight = requestsWeight();
     return (requestsWeight == 0) ? 1.0 : (double) missesWeight / requestsWeight;
+  }
+
+  public double averageWindowSize() {
+    return (adaptionNumber > 0) ? windowPercentage / adaptionNumber : 0;
+  }
+
+  public double windowSizeVariance() {
+    double variance = 0;
+    if (adaptionNumber > 0) {
+      double squareWindowMean = squareWindowPercentage / adaptionNumber;
+      double windowSizeMean = averageWindowSize();
+      variance = squareWindowMean - (windowSizeMean * windowSizeMean);
+    }
+
+    return variance;
   }
 
   public double admissionRate() {

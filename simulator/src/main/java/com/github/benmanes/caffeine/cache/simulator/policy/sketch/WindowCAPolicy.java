@@ -255,12 +255,6 @@ public final class WindowCAPolicy implements Policy {
         latencyEstimator.addValueToRecord(event.key(), event.delayedHitPenalty());
       }
 
-      logger.log(Logger.Level.DEBUG, String.format("key: %d\tevent type: %s\tarrival time: %f\tavailability time: %f\tIs available: %b",
-                                                   event.key(),
-                                                   event.getStatus(),
-                                                   event.getArrivalTime(),
-                                                   node.event().getAvailabilityTime(),
-                                                   isAvailable));
       admittor.record(event.key());
 
       if (headWindow.isHit(key)) {

@@ -24,30 +24,40 @@ import com.github.benmanes.caffeine.cache.simulator.admission.countmin64.CountMi
 import com.github.benmanes.caffeine.cache.simulator.admission.perfect.PerfectFrequency;
 import com.github.benmanes.caffeine.cache.simulator.admission.table.RandomRemovalFrequencyTable;
 import com.github.benmanes.caffeine.cache.simulator.admission.tinycache.TinyCacheAdapter;
-import com.github.benmanes.caffeine.cache.simulator.policy.*;
+import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
+import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
+import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.typesafe.config.Config;
 
 /**
- * Admits new entries based on the estimated frequency of its historic use and access times
- * recorded.
+ * Admittor that checks both latency (using the latest miss latency)
+ * and calculates burstiness into the score of each item.
  *
- * @author himelbrand@gmail.com (Omri Himelbrand)
+ * @author nadav.keren@gmail.com (Nadav Keren)
  */
-public final class LATinyLfu implements Admittor {
+public final class BALATinyLfu implements Admittor {
 
   private final PolicyStats policyStats;
   private final Frequency sketch;
   private LatencyEstimator<Long> latencyEstimator;
+  private LatencyEstimator<Long> burstEstimator;
+  private double burstScoreWeight;
 
   @Override
   public void record(long key) {
     Admittor.super.record(key);
   }
 
-  public LATinyLfu(Config config, PolicyStats policyStats, LatencyEstimator<Long> latencyEstimator) {
+  public BALATinyLfu(Config config,
+                     PolicyStats policyStats,
+                     LatencyEstimator<Long> latencyEstimator,
+                     LatencyEstimator<Long> burstEstimator,
+                     double burstScoreWeight) {
     this.policyStats = policyStats;
     this.sketch = makeSketch(config);
     this.latencyEstimator = latencyEstimator;
+    this.burstEstimator = burstEstimator;
+    this.burstScoreWeight = burstScoreWeight;
   }
 
   private Frequency makeSketch(Config config) {
@@ -105,8 +115,12 @@ public final class LATinyLfu implements Admittor {
 
   private double getScore(long key) {
     long freq = sketch.frequency(key);
-    double latencyDelta = latencyEstimator.getLatencyEstimation(key) - latencyEstimator.getCacheHitEstimation();
+    double latency = latencyEstimator.getLatencyEstimation(key);
+    double burstCost = burstEstimator.getLatencyEstimation(key);
+    double burstScore = burstCost / (burstCost + latency);
+    double latencyDelta = latency - latencyEstimator.getCacheHitEstimation();
 
-    return freq * latencyDelta;
+
+    return (1 + burstScoreWeight * burstScore) * freq * latencyDelta;
   }
 }

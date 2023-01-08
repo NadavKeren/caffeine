@@ -37,7 +37,7 @@ import akka.actor.typed.javadsl.Receive;
 public final class PolicyActor extends AbstractBehavior<PolicyActor.Command> {
   private final ActorRef<Simulator.Command> simulator;
   private final Policy policy;
-  private long eventNumber = 0L;
+  @SuppressWarnings("unused") private long eventNumber = 0L;
 
   public PolicyActor(ActorContext<Command> context,
       ActorRef<Simulator.Command> simulator, Policy policy) {
@@ -60,12 +60,8 @@ public final class PolicyActor extends AbstractBehavior<PolicyActor.Command> {
 
   private Behavior<Command> process(List<AccessEvent> events) {
     policy.stats().stopwatch().start();
-    int b = 0;
     for (AccessEvent event : events) {
       try {
-        if (eventNumber >= 359) {
-          b = b + 1;
-        }
         policy.record(event);
         ++eventNumber;
       } catch (RuntimeException e) {

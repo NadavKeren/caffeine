@@ -30,12 +30,11 @@ import com.typesafe.config.Config;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import org.checkerframework.checker.nullness.qual.Nullable;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.LAHillClimber.AdaptationType;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.LAHillClimber.QueueType;
 
 import java.util.*;
 
-import static com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.LAHillClimber.Adaptation.Type.DECREASE_WINDOW;
-import static com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.LAHillClimber.Adaptation.Type.INCREASE_WINDOW;
-import static com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.LAHillClimber.QueueType.*;
 import static com.google.common.base.Preconditions.checkState;
 import static java.util.Locale.US;
 import static java.util.stream.Collectors.toSet;
@@ -168,38 +167,32 @@ public final class AdaptiveCAPolicy implements Policy {
 
     QueueType queue = null;
     if (node == null) {
-      double delta = latencyEstimator.getDelta(event.key());
-
-      if (delta > normalizationFactor){
-        ++samplesCount;
-        ++maxDeltaCounts;
-
-        maxDelta = (maxDelta * maxDeltaCounts + delta) / maxDeltaCounts;
-      }
-
-      updateNormalization(delta);
+      updateNormalization(event.key());
       onMiss(event);
+      policyStats.recordMiss();
+      policyStats.recordMissPenalty(event.missPenalty());
     } else {
       if (node.event().isAvailableAt(event.getArrivalTime())) {
         node.event().updateHitPenalty(event.hitPenalty());
         event.changeEventStatus(AccessEvent.EventStatus.HIT);
+        policyStats.recordHit();
+        policyStats.recordHitPenalty(event.hitPenalty());
       } else {
         event.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
         event.setDelayedHitPenalty(node.event().getAvailabilityTime());
+        policyStats.recordDelayedHit();
+        policyStats.recordDelayedHitPenalty(event.delayedHitPenalty());
       }
 
       if (headWindow.isHit(key)) {
         onWindowHit(node);
-        policyStats.recordHit();
-        queue = WINDOW;
+        queue = QueueType.WINDOW;
       } else if (headProbation.isHit(key)) {
         onProbationHit(node);
-        policyStats.recordHit();
-        queue = PROBATION;
+        queue = QueueType.PROBATION;
       } else if (headProtected.isHit(key)) {
         onProtectedHit(node);
-        policyStats.recordHit();
-        queue = PROTECTED;
+        queue = QueueType.PROTECTED;
       } else {
         throw new IllegalStateException();
       }
@@ -208,7 +201,16 @@ public final class AdaptiveCAPolicy implements Policy {
     climb(event, queue, isFull);
   }
 
-  private void updateNormalization(double delta) {
+  private void updateNormalization(long key) {
+    double delta = latencyEstimator.getDelta(key);
+
+    if (delta > normalizationFactor){
+      ++samplesCount;
+      ++maxDeltaCounts;
+
+      maxDelta = (maxDelta * maxDeltaCounts + delta) / maxDeltaCounts;
+    }
+
     normalizationBias = normalizationBias > 0
                       ? Math.min(normalizationBias, Math.max(0, delta))
                       : Math.max(0, delta);
@@ -307,10 +309,14 @@ public final class AdaptiveCAPolicy implements Policy {
     double probationSize = maximumSize - windowSize - protectedSize;
     LAHillClimber.Adaptation adaptation = climber
         .adapt(windowSize, probationSize, protectedSize, isFull);
-    if (adaptation.type == INCREASE_WINDOW) {
+    if (adaptation.type == AdaptationType.INCREASE_WINDOW) {
       increaseWindow(adaptation.amount);
-    } else if (adaptation.type == DECREASE_WINDOW) {
+    } else if (adaptation.type == AdaptationType.DECREASE_WINDOW) {
       decreaseWindow(adaptation.amount);
+    }
+
+    if (adaptation.type != AdaptationType.HOLD) {
+      policyStats.recordAdaption((1.0 * this.windowSize) / this.maximumSize);
     }
   }
 
@@ -350,7 +356,7 @@ public final class AdaptiveCAPolicy implements Policy {
     }
 
     double quota = Math.min(amount, windowSize);
-    int steps = (int) windowSize - (int) (windowSize - quota);
+    int steps = (int) Math.min((int) windowSize - (int) (windowSize - quota), maxWindow);
     windowSize -= quota;
 
     for (int i = 0; i < steps; i++) {
@@ -409,7 +415,7 @@ public final class AdaptiveCAPolicy implements Policy {
     checkState(data.size() <= maximumSize, "Maximum: %s > %s", data.size(), maximumSize);
   }
 
-  public static final class AdaptiveCASettings extends BasicSettings {
+  private static final class AdaptiveCASettings extends BasicSettings {
 
     public AdaptiveCASettings(Config config) {
       super(config);

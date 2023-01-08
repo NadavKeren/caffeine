@@ -62,7 +62,10 @@ import com.github.benmanes.caffeine.cache.simulator.policy.product.HazelcastPoli
 import com.github.benmanes.caffeine.cache.simulator.policy.product.OhcPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.product.TCachePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sampled.SampledPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowCostAwareWithBurstinessBlockPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowCostAwareWithBurstinessCalculationPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowTinyLfuPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.AdaptiveCAWithBurstBlockPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.HillClimberWindowTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.feedback.FeedbackTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.feedback.FeedbackWindowTinyLfuPolicy;
@@ -181,6 +184,8 @@ public final class Registry {
   private void registerSketch() {
     registerMany(WindowTinyLfuPolicy.class, WindowTinyLfuPolicy::policies);
     registerMany(WindowCAPolicy.class, WindowCAPolicy::policies);
+    registerMany(WindowCostAwareWithBurstinessBlockPolicy.class, WindowCostAwareWithBurstinessBlockPolicy::policies);
+    registerMany(WindowCostAwareWithBurstinessCalculationPolicy.class, WindowCostAwareWithBurstinessCalculationPolicy::policies);
     registerMany(S4WindowTinyLfuPolicy.class, S4WindowTinyLfuPolicy::policies);
     registerMany(LruWindowTinyLfuPolicy.class, LruWindowTinyLfuPolicy::policies);
     registerMany(RandomWindowTinyLfuPolicy.class, RandomWindowTinyLfuPolicy::policies);
@@ -192,6 +197,7 @@ public final class Registry {
 
     registerMany(HillClimberWindowTinyLfuPolicy.class, HillClimberWindowTinyLfuPolicy::policies);
     registerMany(AdaptiveCAPolicy.class, AdaptiveCAPolicy::policies);
+    registerMany(AdaptiveCAWithBurstBlockPolicy.class, AdaptiveCAWithBurstBlockPolicy::policies);
 
     register(TinyCachePolicy.class, TinyCachePolicy::new);
     register(WindowTinyCachePolicy.class, WindowTinyCachePolicy::new);
