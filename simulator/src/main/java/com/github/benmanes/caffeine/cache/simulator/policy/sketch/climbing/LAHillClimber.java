@@ -62,18 +62,19 @@ public interface LAHillClimber {
   /**
    * The adaptation type and its magnitude.
    */
+  enum AdaptationType {
+    HOLD, INCREASE_WINDOW, DECREASE_WINDOW
+  }
+
   final class Adaptation {
 
-    public enum Type {
-      HOLD, INCREASE_WINDOW, DECREASE_WINDOW
-    }
 
-    private static final Adaptation HOLD = new Adaptation(0, Type.HOLD);
+    private static final Adaptation HOLD = new Adaptation(0, AdaptationType.HOLD);
 
     public final double amount;
-    public final Type type;
+    public final AdaptationType type;
 
-    private Adaptation(double amount, Type type) {
+    private Adaptation(double amount, AdaptationType type) {
       checkArgument(amount >= 0, "Step size %s must be positive", amount);
       this.type = checkNotNull(type);
       this.amount = amount;
@@ -97,11 +98,11 @@ public interface LAHillClimber {
     }
 
     public static Adaptation increaseWindow(double amount) {
-      return new Adaptation(amount, Type.INCREASE_WINDOW);
+      return new Adaptation(amount, AdaptationType.INCREASE_WINDOW);
     }
 
     public static Adaptation decreaseWindow(double amount) {
-      return new Adaptation(amount, Type.DECREASE_WINDOW);
+      return new Adaptation(amount, AdaptationType.DECREASE_WINDOW);
     }
 
     @Override

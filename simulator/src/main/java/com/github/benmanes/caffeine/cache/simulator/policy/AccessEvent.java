@@ -28,6 +28,7 @@ import com.google.common.base.MoreObjects;
  */
 public class AccessEvent {
   private final long key;
+  private EventStatus status = EventStatus.MISS;
 
   private AccessEvent(long key) {
     this.key = key;
@@ -52,13 +53,22 @@ public class AccessEvent {
   public double missPenalty() {
     return 0;
   }
+  public double delayedHitPenalty() { return 0; }
+  public void setDelayedHitPenalty(double availabilityTime) { throw new UnsupportedOperationException(); }
 
   /** Return the real cost of missing this entry */
-  public double estimatedCost() { return 0; }
+
+  public void changeEventStatus(EventStatus status) { this.status = status; }
+
+  public EventStatus getStatus() { return status; }
+
+  public boolean isAvailableAt(double time) { return true; }
+  public double getArrivalTime() { throw new UnsupportedOperationException(); }
+  public double getAvailabilityTime() { throw new UnsupportedOperationException(); }
 
   /** Returns the delta of the penalties for this entry*/
   public double delta() {
-    double eventMP = this.estimatedCost();
+    double eventMP = this.missPenalty();
     double eventHP = this.hitPenalty();
     return eventMP - eventHP;
   }
@@ -110,11 +120,11 @@ public class AccessEvent {
 
   /** Returns an event for the given key and penalties. */
   public static AccessEvent forKeyAndPenalties(long key, double hitPenalty, double missPenalty) {
-    return new PenaltiesAccessEvent(key, hitPenalty, missPenalty, missPenalty);
+    return new PenaltiesAccessEvent(key, hitPenalty, missPenalty, 0);
   }
 
-  public static AccessEvent forKeyPenaltiesAndEstimatedCost(long key, double hitPenalty, double missPenalty, double estimatedMissCost) {
-    return new PenaltiesAccessEvent(key, hitPenalty, missPenalty, estimatedMissCost);
+  public static AccessEvent forKeyPenaltiesAndArrivalTime(long key, double hitPenalty, double missPenalty, double arrivalTime) {
+    return new PenaltiesAccessEvent(key, hitPenalty, missPenalty, arrivalTime);
   }
 
   private static final class WeightedAccessEvent extends AccessEvent {
@@ -131,19 +141,25 @@ public class AccessEvent {
   }
 
   private static final class PenaltiesAccessEvent extends AccessEvent {
-    private final double missPenalty;
-    private final double estimatedMissCost;
+    final private double missPenalty;
     private double hitPenalty;
+    private double delayedHitPenalty = 0;
+    private double arrivalTime;
+    private double availabilityTime;
 
-    PenaltiesAccessEvent(long key, double hitPenalty, double missPenalty, double estimatedMissCost) {
+    PenaltiesAccessEvent(long key,
+                         double hitPenalty,
+                         double missPenalty,
+                         double arrivalTime) {
       super(key);
       this.hitPenalty = hitPenalty;
       this.missPenalty = missPenalty;
-      this.estimatedMissCost = estimatedMissCost;
       this.hitPenalty = hitPenalty;
+      this.arrivalTime = arrivalTime;
+      this.availabilityTime = arrivalTime + missPenalty;
       checkArgument(hitPenalty >= 0);
-      checkArgument(estimatedMissCost >= 0);
       checkArgument(missPenalty >= 0);
+      checkArgument(arrivalTime >= 0);
     }
 
     @Override public void updateHitPenalty(double hitPenalty) {
@@ -155,9 +171,32 @@ public class AccessEvent {
     @Override public double hitPenalty() {
       return hitPenalty;
     }
+
+    @Override
+    public double delayedHitPenalty() { return delayedHitPenalty; }
+
+    @Override
+    public void setDelayedHitPenalty(double availabilityTime) {
+      this.delayedHitPenalty = availabilityTime - this.arrivalTime;
+    }
+
     @Override public boolean isPenaltyAware() {
       return true;
     }
-    @Override public double estimatedCost() { return this.estimatedMissCost; }
+
+    @Override
+    public boolean isAvailableAt(double time) { return (availabilityTime < time); }
+
+    @Override
+    public double getArrivalTime() { return arrivalTime; }
+
+    @Override
+    public double getAvailabilityTime() { return availabilityTime; }
+  }
+
+  public enum EventStatus {
+    MISS,
+    HIT,
+    DELAYED_HIT
   }
 }

@@ -54,9 +54,10 @@ public final class LatencyTraceReader extends TextTraceReader {
         .map(line -> line.split(" ", 4))
         .map(
             split ->
-                AccessEvent.forKeyAndPenalties(
-                    parseKey(split[0]),
-                    Double.parseDouble(split[1]),
-                    Double.parseDouble(split[2])));
+                AccessEvent.forKeyPenaltiesAndArrivalTime(
+                    parseKey(split[1]),
+                    Double.parseDouble(split[2]),
+                    Double.parseDouble(split[3]),
+                    Double.parseDouble(split[0])));
   }
 }

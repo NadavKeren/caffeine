@@ -49,10 +49,12 @@ public class PolicyStats {
   private final String name;
 
   private long hitCount;
+  private long delayedHitCount;
   private long missCount;
   private long hitsWeight;
   private long missesWeight;
   private double hitPenalty;
+  private double delayedHitPenalty;
   private double missPenalty;
   private long evictionCount;
   private long admittedCount;
@@ -68,7 +70,9 @@ public class PolicyStats {
 
     addMetric(Metric.of("Policy", (Supplier<String>) this::name, OBJECT, true));
     addMetric(Metric.of("Hit Rate", (DoubleSupplier) this::hitRate, PERCENT, true));
+    addMetric(Metric.of("Delayed Hit Rate", (DoubleSupplier) this::delayedHitRate, PERCENT, true));
     addMetric(Metric.of("Hits", (LongSupplier) this::hitCount, NUMBER, true));
+    addMetric(Metric.of("Delayed Hits", (LongSupplier) this::delayedHitCount, NUMBER, true));
     addMetric(Metric.of("Misses", (LongSupplier) this::missCount, NUMBER, true));
     addMetric(Metric.of("Requests", (LongSupplier) this::requestCount, NUMBER, true));
     addMetric(Metric.of("Evictions", (LongSupplier) this::evictionCount, NUMBER, true));
@@ -89,6 +93,7 @@ public class PolicyStats {
     addPercentMetric("Adaption", this::percentAdaption);
     addMetric("Average Miss Penalty", this::averageMissPenalty);
     addMetric("Average Penalty", this::averagePenalty);
+    addMetric("Average Penalty not including delayed hits", this::averagePenaltyWithoutDelays);
     addMetric("Steps", this::operationCount);
     addMetric("Time", this::stopwatch);
   }
@@ -137,13 +142,14 @@ public class PolicyStats {
     operationCount += operations;
   }
 
-  public void recordHit() {
-    hitCount++;
-  }
+  public void recordHit() { ++hitCount; }
+
+  public void recordDelayedHit() { ++delayedHitCount; }
 
   public long hitCount() {
     return hitCount;
   }
+  public long delayedHitCount() { return delayedHitCount; }
 
   public void addHits(long hits) {
     hitCount += hits;
@@ -160,6 +166,10 @@ public class PolicyStats {
 
   public void recordHitPenalty(double penalty) {
     hitPenalty += penalty;
+  }
+
+  public void recordDelayedHitPenalty(double penalty) {
+    delayedHitPenalty += penalty;
   }
 
   public double hitPenalty() {
@@ -208,7 +218,7 @@ public class PolicyStats {
   }
 
   public long requestCount() {
-    return hitCount + missCount;
+    return hitCount + missCount + delayedHitCount;
   }
 
   public long requestsWeight() {
@@ -232,7 +242,7 @@ public class PolicyStats {
   }
 
   public double totalPenalty() {
-    return hitPenalty + missPenalty;
+    return hitPenalty + missPenalty + delayedHitPenalty;
   }
 
   public double percentAdaption() {
@@ -245,12 +255,17 @@ public class PolicyStats {
 
   public double hitRate() {
     long requestCount = requestCount();
-    return (requestCount == 0) ? 1.0 : (double) hitCount / requestCount;
+    return (requestCount == 0) ? 1.0 : (double) (hitCount + delayedHitCount) / requestCount;
   }
 
   public double weightedHitRate() {
     long requestsWeight = requestsWeight();
     return (requestsWeight == 0) ? 1.0 : (double) hitsWeight / requestsWeight;
+  }
+
+  public double delayedHitRate() {
+    long requestCount = requestCount();
+    return (requestCount == 0) ? 0.0 : (double) delayedHitCount / requestCount;
   }
 
   public double missRate() {
@@ -276,6 +291,11 @@ public class PolicyStats {
   public double averagePenalty() {
     long requestCount = requestCount();
     return (requestCount == 0) ? 0.0 : totalPenalty() / requestCount;
+  }
+
+  public double averagePenaltyWithoutDelays() {
+    long requestCount = requestCount();
+    return (requestCount == 0) ? 0.0 : (missPenalty + hitPenalty) / requestCount;
   }
 
   public double averageHitPenalty() {

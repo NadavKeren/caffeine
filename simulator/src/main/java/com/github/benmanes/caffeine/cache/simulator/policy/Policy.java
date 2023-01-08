@@ -55,6 +55,8 @@ public interface Policy {
     WEIGHTED
   }
 
+  default boolean isPenaltyAware() { return false; }
+
   /** An optional annotation to declare additional capabilities. */
   @Retention(RUNTIME)
   @Target(ElementType.TYPE)
