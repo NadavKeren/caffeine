@@ -34,7 +34,8 @@ import akka.actor.typed.javadsl.Receive;
  *
  * @author ben.manes@gmail.com (Ben Manes)
  */
-public final class PolicyActor extends AbstractBehavior<PolicyActor.Command> {
+public final class
+PolicyActor extends AbstractBehavior<PolicyActor.Command> {
   private final ActorRef<Simulator.Command> simulator;
   private final Policy policy;
   @SuppressWarnings("unused") private long eventNumber = 0L;

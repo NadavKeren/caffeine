@@ -7,10 +7,11 @@ public class CacheEntry {
     private long lastOperationNum;
     private long lastOperationTime;
 
-    public CacheEntry(AccessEvent event, long operationNum, double benefitScore) {
+    public CacheEntry() {
+        this(null);
+    }
+    public CacheEntry(AccessEvent event) {
         this.event = event;
-        this.lastOperationNum = operationNum;
-        this.lastOperationTime = System.nanoTime();
     }
 
     public AccessEvent getEvent() { return event; }
@@ -20,7 +21,11 @@ public class CacheEntry {
     public long getLastOperationTime() { return lastOperationTime; }
 
     public void recordOperation(long operationNum) {
-        this.lastOperationNum = operationNum;
-        this.lastOperationTime = System.nanoTime();
+        lastOperationNum = operationNum;
+        lastOperationTime = System.nanoTime();
+    }
+
+    public void halveOperationCount() {
+        recordOperation(Math.max(1, lastOperationNum >> 1));
     }
 }

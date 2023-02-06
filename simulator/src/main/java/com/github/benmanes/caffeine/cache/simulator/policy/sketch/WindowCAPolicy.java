@@ -16,18 +16,18 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
+import com.github.benmanes.caffeine.cache.simulator.CacheEntry;
 import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
 import com.github.benmanes.caffeine.cache.simulator.admission.LATinyLfu;
 import com.github.benmanes.caffeine.cache.simulator.policy.*;
-import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock.Node;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock;
 import com.typesafe.config.Config;
-import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
-import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
 import java.util.List;
 import java.util.Set;
+import java.util.function.DoubleSupplier;
 
+import static com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats.Metric.MetricType.PERCENT;
 import static com.google.common.base.Preconditions.checkState;
 import static java.util.stream.Collectors.toSet;
 
@@ -43,21 +43,16 @@ import static java.lang.System.Logger;
 @Policy.PolicySpec(name = "sketch.WindowCA")
 public final class WindowCAPolicy implements Policy {
 
-  private final Long2ObjectMap<Node> data;
-  private final PolicyStats policyStats;
+  private static boolean debug = true;
+
+  private final WindowCAStats policyStats;
   private final LatencyEstimator<Long> latencyEstimator;
   private final Admittor admittor;
-  private final long maximumSize;
+  private final long cacheSize;
 
-  private final CraBlock headWindow;
-  private final CraBlock headProbation;
-  private final CraBlock headProtected;
-
-  private final long maxWindow;
-  private final long maxProtected;
-
-  private int sizeWindow;
-  private int sizeProtected;
+  private final CraBlock windowBlock;
+  private final CraBlock probationBlock;
+  private final CraBlock protectedBlock;
   private double normalizationBias;
   private double normalizationFactor;
   private double maxDelta;
@@ -68,23 +63,26 @@ public final class WindowCAPolicy implements Policy {
 
   public WindowCAPolicy(double percentMain, WindowCASettings settings, int k,
                         int maxLists) {
-    this.policyStats = new PolicyStats("sketch.WindowCATinyLfu (%.0f%%,k=%d,maxLists=%d)", 100 * (1.0d - percentMain), k,
-            maxLists);
+    this.policyStats = new WindowCAStats("sketch.WindowCATinyLfu (%.0f%%,k=%d,maxLists=%d)",
+                                         100 * (1.0d - percentMain),
+                                         k,
+                                         maxLists);
     this.latencyEstimator = createEstimator(settings.config());
     this.admittor = new LATinyLfu(settings.config(), policyStats, latencyEstimator);
-    int maxMain = (int) (settings.maximumSize() * percentMain);
-    this.maxProtected = (int) (maxMain * settings.percentMainProtected());
-    this.maxWindow = settings.maximumSize() - maxMain;
-    this.data = new Long2ObjectOpenHashMap<>();
-    this.maximumSize = settings.maximumSize();
-    this.headProtected = new CraBlock(k, maxLists, this.maxProtected, latencyEstimator);
-    this.headProbation = new CraBlock(k, maxLists, maxMain - this.maxProtected, latencyEstimator);
-    this.headWindow = new CraBlock(k, maxLists, this.maxWindow, latencyEstimator);
+    this.cacheSize = settings.maximumSize();
+    final int mainCacheSize = (int) (cacheSize * percentMain);
+    final long protectedBlockSize = (int) (mainCacheSize * settings.percentMainProtected());
+    final long windowSize = this.cacheSize - mainCacheSize;
+    this.protectedBlock = new CraBlock(k, maxLists, protectedBlockSize, latencyEstimator, true);
+    this.probationBlock = new CraBlock(k, maxLists, mainCacheSize - protectedBlockSize, latencyEstimator, true);
+    this.windowBlock = new CraBlock(k, maxLists, windowSize, latencyEstimator, true);
     this.normalizationBias = 0;
     this.normalizationFactor = 0;
     this.maxDelta = 0;
     this.maxDeltaCounts = 0;
     this.samplesCount = 0;
+
+    printSegmentSizes();
   }
 
   private LatencyEstimator<Long> createEstimator(Config config) {
@@ -124,11 +122,14 @@ public final class WindowCAPolicy implements Policy {
   public static Set<Policy> policies(Config config) {
     WindowCASettings settings = new WindowCASettings(config);
     return settings.percentMain().stream()
-        .flatMap(percentMain ->
-            settings.kValues().stream()
-                .map(k -> settings.maxLists().stream()
-                                .map(ml -> new WindowCAPolicy(percentMain, settings, k,ml)
-                                )))
+                   .flatMap(percentMain ->
+                                    settings.kValues().stream()
+                                               .map(k ->
+                                                            settings.maxLists().stream()
+                                                                    .map(ml -> new WindowCAPolicy(percentMain,
+                                                                                                  settings,
+                                                                                                  k,
+                                                                                                  ml))))
         .flatMap(x -> x)
         .collect(toSet());
   }
@@ -142,46 +143,12 @@ public final class WindowCAPolicy implements Policy {
    * Adds the entry to the admission window, evicting if necessary.
    */
   private void onMiss(AccessEvent event) {
-    long key = event.key();
     event.changeEventStatus(AccessEvent.EventStatus.MISS);
-    admittor.record(event);
-    Node n = headWindow.addEntry(event);
-    data.put(key, n);
-    sizeWindow++;
+    updateNormalization(event.key());
+    windowBlock.addEntry(new CacheEntry(event));
     evict();
   }
 
-  /**
-   * Moves the entry to the MRU position in the admission window.
-   */
-  private void onWindowHit(Node node) {
-    node.moveToTail();
-  }
-
-  /**
-   * Promotes the entry to the protected region's MRU position, demoting an entry if necessary.
-   */
-  private void onProbationHit(Node node) {
-    node.remove();
-    headProbation.remove(node.key());
-    headProtected.addEntry(node);
-
-    sizeProtected++;
-    if (sizeProtected > maxProtected) {
-      Node demote = headProtected.findVictim();
-      demote.remove();
-      headProtected.remove(demote.key());
-      headProbation.addEntry(demote);
-      sizeProtected--;
-    }
-  }
-
-  /**
-   * Moves the entry to the MRU position, if it falls outside the fast-path threshold.
-   */
-  private void onProtectedHit(Node node) {
-    node.moveToTail();
-  }
   private void updateNormalization(long key) {
     double delta = latencyEstimator.getDelta(key);
 
@@ -202,91 +169,133 @@ public final class WindowCAPolicy implements Policy {
       samplesCount = 0;
     }
 
-    headProtected.setNormalization(normalizationBias, normalizationFactor);
-    headProbation.setNormalization(normalizationBias, normalizationFactor);
-    headWindow.setNormalization(normalizationBias, normalizationFactor);
+    protectedBlock.setNormalization(normalizationBias, normalizationFactor);
+    probationBlock.setNormalization(normalizationBias, normalizationFactor);
+    windowBlock.setNormalization(normalizationBias, normalizationFactor);
   }
-  /**
-   * Evicts from the admission window into the probation space. If the size exceeds the maximum,
-   * then the admission candidate and probation's victim are evaluated and one is evicted.
-   */
-  private void evict() {
-    if (sizeWindow <= maxWindow) {
-      return;
+
+  private void recordHit(CacheEntry entry, AccessEvent currEvent, BlockType queue) {
+    if (entry.getEvent().isAvailableAt(currEvent.getArrivalTime())) {
+      entry.getEvent().updateHitPenalty(currEvent.hitPenalty());
+      currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
+      policyStats.recordHit();
+      policyStats.recordHitPenalty(currEvent.hitPenalty());
+    } else {
+      currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+      currEvent.setDelayedHitPenalty(entry.getEvent().getAvailabilityTime());
+      policyStats.recordDelayedHit();
+      policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
     }
-    Node candidate = headWindow.findVictim();
-    sizeWindow--;
-    candidate.remove();
-    headWindow.remove(candidate.key());
-    headProbation.addEntry(candidate);
-    if (data.size() > maximumSize) {
-      Node victim = headProbation.findVictim();
-      Node evict = admittor.admit(candidate.event(), victim.event()) ? victim : candidate;
-      data.remove(evict.key());
-      evict.remove();
-      headProbation.remove(evict.key());
-      policyStats.recordEviction();
+
+    switch (queue) {
+      case WINDOW:
+        policyStats.recordWindowHit();
+        break;
+      case PROBATION:
+        policyStats.recordProbationHit();
+        break;
+      case PROTECTED:
+        policyStats.recordProtectedHit();
+        break;
     }
+  }
+
+  private void demoteProtected() {
+    CacheEntry demotedEntry = protectedBlock.findVictim();
+    protectedBlock.remove(demotedEntry.getEvent().key());
+    probationBlock.addEntry(demotedEntry);
   }
 
   @Override
   public void record(AccessEvent event) {
     long key = event.key();
+    CacheEntry entry = null;
     policyStats.recordOperation();
-    Node node = data.get(key);
+    admittor.record(event);
 
-    if (node == null) {
+    BlockType queue = null;
+    if (windowBlock.isHit(key)) {
+      windowBlock.moveToTail(key);
+      entry = windowBlock.get(key);
+
+      queue = BlockType.WINDOW;
+    } else if (probationBlock.isHit(key)) {
+      entry = probationBlock.remove(key);
+      if (protectedBlock.isFull()) {
+        demoteProtected();
+      }
+      protectedBlock.addEntry(entry);
+
+      queue = BlockType.PROBATION;
+    } else if (protectedBlock.isHit(key)) {
+      protectedBlock.moveToTail(key);
+      entry = protectedBlock.get(key);
+
+      queue = BlockType.PROTECTED;
+    } else {
       onMiss(event);
-      latencyEstimator.record(event.key(), event.missPenalty());
+    }
+
+    if (entry != null) {
+      recordHit(entry, event, queue);
+    } else {
       policyStats.recordMiss();
       policyStats.recordMissPenalty(event.missPenalty());
-      updateNormalization(key);
-    } else {
-      boolean isAvailable = node.event().isAvailableAt(event.getArrivalTime());
-      if (isAvailable) {
-        event.changeEventStatus(AccessEvent.EventStatus.HIT);
-        policyStats.recordHit();
-        policyStats.recordHitPenalty(event.hitPenalty());
-      } else {
-        event.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
-        event.setDelayedHitPenalty(node.event().getAvailabilityTime());
-        policyStats.recordDelayedHitPenalty(event.delayedHitPenalty());
-        policyStats.recordDelayedHit();
-        latencyEstimator.addValueToRecord(event.key(), event.delayedHitPenalty());
-      }
+    }
+  }
 
-      admittor.record(event.key());
-
-      if (headWindow.isHit(key)) {
-        onWindowHit(node);
-      } else if (headProbation.isHit(key)) {
-        onProbationHit(node);
-      } else if (headProtected.isHit(key)) {
-        onProtectedHit(node);
+  /**
+   * Evicts from the admission window into the probation space. If the size exceeds the maximum,
+   * then the admission candidate and probation's victim are evaluated and one is evicted.
+   */
+  private void evict() {
+    if (windowBlock.isFull()) {
+      CacheEntry candidate = windowBlock.removeVictim();
+      if (probationBlock.isFull()) {
+        CacheEntry probationVictim = probationBlock.findVictim();
+        boolean shouldAdmitCandidate = admittor.admit(candidate.getEvent(), probationVictim.getEvent());
+        if (shouldAdmitCandidate) {
+          probationBlock.removeVictim();
+          probationBlock.addEntry(candidate);
+          policyStats.recordEviction();
+        }
       } else {
-        throw new IllegalStateException();
+        probationBlock.addEntry(candidate);
       }
     }
   }
 
   @Override
   public void finished() {
-    long windowSize = data.values().stream().filter(n -> headWindow.isHit(n.key())).count();
-    long probationSize = data.values().stream().filter(n -> headProbation.isHit(n.key())).count();
-    long protectedSize = data.values().stream().filter(n -> headProtected.isHit(n.key())).count();
-    checkState(windowSize == sizeWindow);
-    checkState(protectedSize == sizeProtected);
-    checkState(probationSize == data.size() - windowSize - protectedSize);
+    final long totalSize = windowBlock.getMaximumSize()
+                           + protectedBlock.getMaximumSize()
+                           + probationBlock.getMaximumSize();
 
-    checkState(data.size() <= maximumSize);
+    // Allowing rounding errors that can be up to +-3
+    checkState(Math.abs(totalSize - cacheSize) <= 3 ,
+               "Maximum size mismatch: expected: %s got: %s",
+               cacheSize,
+               totalSize);
+  }
+
+  private void printSegmentSizes() {
+    if (debug) {
+      final long windowSize = windowBlock.getMaximumSize();
+      final long protectedSize = protectedBlock.getMaximumSize();
+      final long probationSize = probationBlock.getMaximumSize();
+      System.out.printf("windowSize=%d, protectedSize=%d, probationSize=%d, percentWindow=%.1f, "
+                        + "percentProtected=%.1f, percentProbation=%.1f\n",
+                        windowSize,
+                        protectedSize,
+                        probationSize,
+                        (100.0 * windowSize) / cacheSize,
+                        (100.0 * protectedSize) / cacheSize,
+                        (100.0 * probationSize) / cacheSize);
+    }
   }
 
   @Override
   public boolean isPenaltyAware() { return true; }
-
-  enum Status {
-    WINDOW, PROBATION, PROTECTED
-  }
 
   public static final class WindowCASettings extends BasicSettings {
 
@@ -309,5 +318,34 @@ public final class WindowCAPolicy implements Policy {
     public List<Integer> maxLists() {
       return config().getIntList("ca-window.cra.max-lists");
     }
+  }
+
+  public static class WindowCAStats extends PolicyStats {
+    private long windowHitCount = 0;
+    private long probationHitCount = 0;
+    private long protectedHitCount = 0;
+
+    public WindowCAStats(String format, Object... args) {
+      super(format, args);
+      addMetric(Metric.of("Window Hit Rate", (DoubleSupplier) this::windowHitRate, PERCENT, true));
+      addMetric(Metric.of("Probation Hit Rate", (DoubleSupplier) this::probationHitRate, PERCENT, true));
+      addMetric(Metric.of("Protected Hit Rate", (DoubleSupplier) this::protectedHitRate, PERCENT, true));
+    }
+
+    public double windowHitRate() { return (double) windowHitCount / super.requestCount(); }
+
+    public double probationHitRate() { return (double) probationHitCount / super.requestCount(); }
+
+    public double protectedHitRate() { return (double) protectedHitCount / super.requestCount(); }
+
+    public void recordWindowHit() { ++this.windowHitCount; }
+
+    public void recordProbationHit() { ++this.probationHitCount; }
+
+    public void recordProtectedHit() { ++this.protectedHitCount; }
+  }
+
+  protected enum BlockType {
+    WINDOW, PROBATION, PROTECTED
   }
 }

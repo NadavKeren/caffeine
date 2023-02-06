@@ -98,7 +98,7 @@ public class PolicyStats {
     addPercentMetric("Adaption", this::percentAdaption);
     addMetric("Average Miss Penalty", this::averageMissPenalty);
     addMetric("Average Penalty", this::averagePenalty);
-    addMetric("Average Penalty not including delayed hits", this::averagePenaltyWithoutDelays);
+//    addMetric("Average Penalty not including delayed hits", this::averagePenaltyWithoutDelays);
     addMetric("Steps", this::operationCount);
     addMetric("Time", this::stopwatch);
   }
