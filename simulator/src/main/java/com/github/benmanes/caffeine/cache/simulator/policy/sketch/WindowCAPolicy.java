@@ -97,9 +97,6 @@ public final class WindowCAPolicy implements Policy {
       case "latest":
         estimator = new LatestLatencyEstimator<>();
         break;
-      case "latest-with-delayed-hits":
-        estimator = new BurstLatencyEstimator<>();
-        break;
       case "true-average":
         estimator = new TrueAverageEstimator<>();
         break;
@@ -162,14 +159,12 @@ public final class WindowCAPolicy implements Policy {
    * Promotes the entry to the protected region's MRU position, demoting an entry if necessary.
    */
   private void onProbationHit(Node node) {
-    node.remove();
     headProbation.remove(node.key());
     headProtected.addEntry(node);
 
     sizeProtected++;
     if (sizeProtected > maxProtected) {
       Node demote = headProtected.findVictim();
-      demote.remove();
       headProtected.remove(demote.key());
       headProbation.addEntry(demote);
       sizeProtected--;
@@ -216,14 +211,12 @@ public final class WindowCAPolicy implements Policy {
     }
     Node candidate = headWindow.findVictim();
     sizeWindow--;
-    candidate.remove();
     headWindow.remove(candidate.key());
     headProbation.addEntry(candidate);
     if (data.size() > maximumSize) {
       Node victim = headProbation.findVictim();
       Node evict = admittor.admit(candidate.event(), victim.event()) ? victim : candidate;
       data.remove(evict.key());
-      evict.remove();
       headProbation.remove(evict.key());
       policyStats.recordEviction();
     }

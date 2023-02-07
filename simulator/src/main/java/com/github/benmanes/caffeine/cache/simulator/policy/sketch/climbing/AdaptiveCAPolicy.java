@@ -17,7 +17,6 @@ package com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.BucketLatencyEstimation;
-import com.github.benmanes.caffeine.cache.simulator.policy.sketch.BurstLatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
 import com.github.benmanes.caffeine.cache.simulator.admission.LATinyLfu;
 import com.github.benmanes.caffeine.cache.simulator.policy.*;
@@ -114,9 +113,6 @@ public final class AdaptiveCAPolicy implements Policy {
     switch (estimationType) {
       case "latest":
         estimator = new LatestLatencyEstimator<>();
-        break;
-      case "latest-with-delayed-hits":
-        estimator = new BurstLatencyEstimator<>();
         break;
       case "true-average":
         estimator = new TrueAverageEstimator<>();
@@ -313,10 +309,6 @@ public final class AdaptiveCAPolicy implements Policy {
       increaseWindow(adaptation.amount);
     } else if (adaptation.type == AdaptationType.DECREASE_WINDOW) {
       decreaseWindow(adaptation.amount);
-    }
-
-    if (adaptation.type != AdaptationType.HOLD) {
-      policyStats.recordAdaption((1.0 * this.windowSize) / this.maximumSize);
     }
   }
 
