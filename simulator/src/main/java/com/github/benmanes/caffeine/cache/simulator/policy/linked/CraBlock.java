@@ -17,6 +17,7 @@ package com.github.benmanes.caffeine.cache.simulator.policy.linked;
 
 
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
+import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.google.common.base.MoreObjects;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
@@ -70,9 +71,9 @@ public final class CraBlock {
     this.normalizationFactor = normalizationFactor;
   }
 
-  private int findList(AccessEvent candidate) {
+  private int findList(long key) {
     int listNum = 0;
-    double delta = latencyEstimator.getDelta(candidate.key());
+    double delta = latencyEstimator.getDelta(key);
 
     if (delta < 0) {
       int expectedListNum = (int) ((delta - normalizationBias) / normalizationFactor);
@@ -82,30 +83,37 @@ public final class CraBlock {
     return listNum;
   }
 
-  private Node addToList(AccessEvent candidate, Node inSentinel) {
-    Node node = new Node(candidate, inSentinel);
-    data.put(candidate.key(), node);
-    node.appendToTail();
-    node.updateOp(currOp++);
+  private void addToList(EntryData entry, Node inSentinel) {
+    Node newNode = new Node(entry, inSentinel);
+    data.put(entry.key(), newNode);
+    newNode.appendToTail();
+    newNode.data.recordOperation(currOp++);
     ++size;
-    return node;
   }
 
-  private Node addToList(Node node, Node inSentinel) {
-    node.sentinel = inSentinel;
-    data.put(node.key, node);
-    node.appendToTail();
-    node.updateOp(currOp++);
-    ++size;
-    return node;
+  public void remove(long key){
+    Node node = data.get(key);
+    node.remove();
+    data.remove(key);
+    --size;
+  }
+  public EntryData addEntry(AccessEvent event){
+    EntryData newEntry = new EntryData(event);
+    return addEntry(newEntry);
   }
 
-  public Node findVictim() {
-    double rank;
+  public EntryData addEntry(EntryData entry){
+    int listIndex = findList(entry.key());
+    activeLists.add(listIndex);
+    addToList(entry, lists[listIndex]);
+
+    return entry;
+  }
+
+  private Node getVictim() {
     Node currSentinel;
     Node victim = null;
-    double currMaxDelta = -1;
-    double minRank = Double.MAX_VALUE;
+    double minScore = Double.MAX_VALUE;
     if (activeLists.contains(0)){
       currSentinel = lists[0];
       if (currSentinel.next != currSentinel) {
@@ -118,13 +126,13 @@ public final class CraBlock {
         continue;
       }
       Node currVictim = currSentinel.next;
-      double currDelta = latencyEstimator.getLatencyEstimation(currVictim.event.key());
-      currMaxDelta = Math.max(currDelta, currMaxDelta);
 
-      rank = Math.signum(currDelta) * Math.pow(Math.abs(currDelta), Math.pow((double) currOp - currVictim.lastOp, -decayFactor));
-      if (rank < minRank || victim == null || (rank == minRank
-              && (double) currVictim.lastOp / currOp < (double) victim.lastOp / currOp)) {
-        minRank = rank;
+      double currScore = score(currVictim);
+      if (currScore < minScore
+          || victim == null
+          || (currScore == minScore
+              && (double) currVictim.data.lastOpNum() / currOp < (double) victim.data.lastOpNum() / currOp)) {
+        minScore = currScore;
         victim = currVictim;
       }
     }
@@ -136,27 +144,39 @@ public final class CraBlock {
 
     return victim;
   }
-  public void remove(long key){
-    Node node = data.get(key);
-    node.remove();
-    data.remove(key);
-    --size;
+
+  /**
+   *
+   * @param node Non-null node to be scored.
+   * @return The score of the node according to the numerical recency estimation defined in the article.
+   */
+  private double score(Node node) {
+    final double delta = latencyEstimator.getLatencyEstimation(node.key());
+    final long numOfOpsSinceModified = currOp - node.data.lastOpNum(); // For all nodes lastOpNum < currOp
+    final double numericalRecencyScore = Math.pow((double) numOfOpsSinceModified, -decayFactor);
+
+    return Math.signum(delta) * Math.pow(Math.abs(delta), numericalRecencyScore);
   }
 
-  public Node addEntry(AccessEvent event){
-    int listIndex = findList(event);
-    activeLists.add(listIndex);
-    return addToList(event,lists[listIndex]);
+  public EntryData findVictim() {
+    return getVictim().data();
   }
 
-  public Node addEntry(Node node){
-    int listIndex = findList(node.event());
-    activeLists.add(listIndex);
-    return addToList(node,lists[listIndex]);
+  public EntryData removeVictim() {
+    Node victim = getVictim();
+    remove(victim.key());
+    return victim.data;
   }
 
   public boolean isHit(long key){
     return data.containsKey(key);
+  }
+
+  public void moveToTail(EntryData entry) {
+    Node node = data.get(entry.key());
+    checkState(node != null, "Illegal move to tail");
+
+    node.moveToTail();
   }
 
   public boolean isFull() { return size >= maximumSize; }
@@ -164,16 +184,13 @@ public final class CraBlock {
   /**
    * A node on the double-linked list.
    */
-  public static final class Node {
+  protected static final class Node {
 
     Node sentinel;
     int size;
     Node prev;
     Node next;
-    long key;
-    AccessEvent event;
-    long lastOp;
-    long lastTouch;
+    EntryData data;
 
     /**
      * Creates a new sentinel node.
@@ -183,19 +200,22 @@ public final class CraBlock {
       this.size = 0;
       this.prev = this;
       this.next = this;
-      this.key = Long.MIN_VALUE;
-      this.event = null;
-      this.lastOp = 1;
+      this.data = new EntryData(null);
     }
 
     /**
      * Creates a new, unlinked node.
      */
     public Node(AccessEvent event, Node sentinel) {
+      this(new EntryData(event), sentinel);
+    }
+
+    /**
+     * Creates a new, unlinked node.
+     */
+    public Node(EntryData data, Node sentinel) {
       this.sentinel = sentinel;
-      this.key = event.key();
-      this.event = event;
-      this.lastOp = 1;
+      this.data = data;
     }
 
     /**
@@ -233,31 +253,25 @@ public final class CraBlock {
       this.appendToTail();
     }
 
-    /**
-     * Updates the node's lastop without moving it
-     */
-    public void updateOp(long op) {
-      lastOp = op;
-      lastTouch = System.nanoTime();
-    }
-
-    public int getSize() {
+    public int size() {
       return this.sentinel.size;
     }
 
     public AccessEvent event() {
-      return this.event;
+      return data.event();
     }
 
     public long key() {
-      return key;
+      return data.key();
     }
+
+    public EntryData data() { return data; }
 
     @Override
     public String toString() {
       return MoreObjects.toStringHelper(this)
-              .add("key", key)
-              .add("size",size)
+              .add("key", key())
+              .add("size", size())
               .toString();
     }
   }

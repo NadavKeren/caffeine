@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Omri Himelbrand and Nadav Keren. All Rights Reserved.
+ * Copyright 2020 Omri Himelbrand. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
 import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
 import com.github.benmanes.caffeine.cache.simulator.admission.LATinyLfu;
 import com.github.benmanes.caffeine.cache.simulator.policy.*;
-import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock.Node;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock;
 import com.typesafe.config.Config;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
@@ -43,15 +42,15 @@ import static java.lang.System.Logger;
 @Policy.PolicySpec(name = "sketch.WindowCA")
 public final class WindowCAPolicy implements Policy {
 
-  private final Long2ObjectMap<Node> data;
+  private final Long2ObjectMap<EntryData> data;
   private final PolicyStats policyStats;
   private final LatencyEstimator<Long> latencyEstimator;
   private final Admittor admittor;
   private final long maximumSize;
 
-  private final CraBlock headWindow;
-  private final CraBlock headProbation;
-  private final CraBlock headProtected;
+  private final CraBlock windowBlock;
+  private final CraBlock probationBlock;
+  private final CraBlock protectedBlock;
 
   private final long maxWindow;
   private final long maxProtected;
@@ -77,9 +76,9 @@ public final class WindowCAPolicy implements Policy {
     this.maxWindow = settings.maximumSize() - maxMain;
     this.data = new Long2ObjectOpenHashMap<>();
     this.maximumSize = settings.maximumSize();
-    this.headProtected = new CraBlock(k, maxLists, this.maxProtected, latencyEstimator);
-    this.headProbation = new CraBlock(k, maxLists, maxMain - this.maxProtected, latencyEstimator);
-    this.headWindow = new CraBlock(k, maxLists, this.maxWindow, latencyEstimator);
+    this.protectedBlock = new CraBlock(k, maxLists, this.maxProtected, latencyEstimator);
+    this.probationBlock = new CraBlock(k, maxLists, maxMain - this.maxProtected, latencyEstimator);
+    this.windowBlock = new CraBlock(k, maxLists, this.maxWindow, latencyEstimator);
     this.normalizationBias = 0;
     this.normalizationFactor = 0;
     this.maxDelta = 0;
@@ -142,7 +141,7 @@ public final class WindowCAPolicy implements Policy {
     long key = event.key();
     event.changeEventStatus(AccessEvent.EventStatus.MISS);
     admittor.record(event);
-    Node n = headWindow.addEntry(event);
+    EntryData n = windowBlock.addEntry(event);
     data.put(key, n);
     sizeWindow++;
     evict();
@@ -151,24 +150,22 @@ public final class WindowCAPolicy implements Policy {
   /**
    * Moves the entry to the MRU position in the admission window.
    */
-  private void onWindowHit(Node node) {
-    node.moveToTail();
+  private void onWindowHit(EntryData entry) {
+    windowBlock.moveToTail(entry);
   }
 
   /**
    * Promotes the entry to the protected region's MRU position, demoting an entry if necessary.
    */
-  private void onProbationHit(Node node) {
-    node.remove();
-    headProbation.remove(node.key());
-    headProtected.addEntry(node);
+  private void onProbationHit(EntryData entry) {
+    probationBlock.remove(entry.key());
+    protectedBlock.addEntry(entry);
 
     sizeProtected++;
     if (sizeProtected > maxProtected) {
-      Node demote = headProtected.findVictim();
-      demote.remove();
-      headProtected.remove(demote.key());
-      headProbation.addEntry(demote);
+      EntryData demote = protectedBlock.findVictim();
+      protectedBlock.remove(demote.key());
+      probationBlock.addEntry(demote);
       sizeProtected--;
     }
   }
@@ -176,9 +173,10 @@ public final class WindowCAPolicy implements Policy {
   /**
    * Moves the entry to the MRU position, if it falls outside the fast-path threshold.
    */
-  private void onProtectedHit(Node node) {
-    node.moveToTail();
+  private void onProtectedHit(EntryData entry) {
+    protectedBlock.moveToTail(entry);
   }
+
   private void updateNormalization(long key) {
     double delta = latencyEstimator.getDelta(key);
 
@@ -199,9 +197,9 @@ public final class WindowCAPolicy implements Policy {
       samplesCount = 0;
     }
 
-    headProtected.setNormalization(normalizationBias, normalizationFactor);
-    headProbation.setNormalization(normalizationBias, normalizationFactor);
-    headWindow.setNormalization(normalizationBias, normalizationFactor);
+    protectedBlock.setNormalization(normalizationBias, normalizationFactor);
+    probationBlock.setNormalization(normalizationBias, normalizationFactor);
+    windowBlock.setNormalization(normalizationBias, normalizationFactor);
   }
   /**
    * Evicts from the admission window into the probation space. If the size exceeds the maximum,
@@ -211,17 +209,15 @@ public final class WindowCAPolicy implements Policy {
     if (sizeWindow <= maxWindow) {
       return;
     }
-    Node candidate = headWindow.findVictim();
+
+    EntryData windowBlockVictim = windowBlock.removeVictim();
     sizeWindow--;
-    candidate.remove();
-    headWindow.remove(candidate.key());
-    headProbation.addEntry(candidate);
+    probationBlock.addEntry(windowBlockVictim);
     if (data.size() > maximumSize) {
-      Node victim = headProbation.findVictim();
-      Node evict = admittor.admit(candidate.event(), victim.event()) ? victim : candidate;
+      EntryData victim = probationBlock.findVictim();
+      EntryData evict = admittor.admit(windowBlockVictim.event(), victim.event()) ? victim : windowBlockVictim;
       data.remove(evict.key());
-      evict.remove();
-      headProbation.remove(evict.key());
+      probationBlock.remove(evict.key());
       policyStats.recordEviction();
     }
   }
@@ -230,23 +226,23 @@ public final class WindowCAPolicy implements Policy {
   public void record(AccessEvent event) {
     long key = event.key();
     policyStats.recordOperation();
-    Node node = data.get(key);
+    EntryData entry = data.get(key);
 
-    if (node == null) {
+    if (entry == null) {
       onMiss(event);
       latencyEstimator.record(event.key(), event.missPenalty());
       policyStats.recordMiss();
       policyStats.recordMissPenalty(event.missPenalty());
       updateNormalization(key);
     } else {
-      boolean isAvailable = node.event().isAvailableAt(event.getArrivalTime());
+      boolean isAvailable = entry.event().isAvailableAt(event.getArrivalTime());
       if (isAvailable) {
         event.changeEventStatus(AccessEvent.EventStatus.HIT);
         policyStats.recordHit();
         policyStats.recordHitPenalty(event.hitPenalty());
       } else {
         event.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
-        event.setDelayedHitPenalty(node.event().getAvailabilityTime());
+        event.setDelayedHitPenalty(entry.event().getAvailabilityTime());
         policyStats.recordDelayedHitPenalty(event.delayedHitPenalty());
         policyStats.recordDelayedHit();
         latencyEstimator.addValueToRecord(event.key(), event.delayedHitPenalty());
@@ -254,12 +250,12 @@ public final class WindowCAPolicy implements Policy {
 
       admittor.record(event.key());
 
-      if (headWindow.isHit(key)) {
-        onWindowHit(node);
-      } else if (headProbation.isHit(key)) {
-        onProbationHit(node);
-      } else if (headProtected.isHit(key)) {
-        onProtectedHit(node);
+      if (windowBlock.isHit(key)) {
+        onWindowHit(entry);
+      } else if (probationBlock.isHit(key)) {
+        onProbationHit(entry);
+      } else if (protectedBlock.isHit(key)) {
+        onProtectedHit(entry);
       } else {
         throw new IllegalStateException();
       }
@@ -268,9 +264,9 @@ public final class WindowCAPolicy implements Policy {
 
   @Override
   public void finished() {
-    long windowSize = data.values().stream().filter(n -> headWindow.isHit(n.key())).count();
-    long probationSize = data.values().stream().filter(n -> headProbation.isHit(n.key())).count();
-    long protectedSize = data.values().stream().filter(n -> headProtected.isHit(n.key())).count();
+    long windowSize = data.values().stream().filter(n -> windowBlock.isHit(n.key())).count();
+    long probationSize = data.values().stream().filter(n -> probationBlock.isHit(n.key())).count();
+    long protectedSize = data.values().stream().filter(n -> protectedBlock.isHit(n.key())).count();
     checkState(windowSize == sizeWindow);
     checkState(protectedSize == sizeProtected);
     checkState(probationSize == data.size() - windowSize - protectedSize);
