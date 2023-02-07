@@ -35,60 +35,35 @@ import static com.google.common.base.Preconditions.checkState;
  */
 public final class CraBlock {
 
-  final Long2ObjectMap<Node> data;
-  final Node[] lists;
-  final Set<Integer> activeLists;
-  final long maximumSize;
-  private final long resetCount;
+  private final Long2ObjectMap<Node> data;
+  private final Node[] lists;
+  private final Set<Integer> activeLists;
+  private final long maximumSize;
+  private long size;
   private double normalizationBias;
   private double normalizationFactor;
-  private final double k;
+  private final double decayFactor;
   private final int maxLists;
-  private int reqCount;
   private int currOp;
-  private long lastReset;
-  private int currentSize;
   private final LatencyEstimator<Long> latencyEstimator;
 
-  public CraBlock(double k, int maxLists, long maximumSize, LatencyEstimator<Long> latencyEstimator) {
-    this.maximumSize = maximumSize;
-    this.activeLists = new HashSet<>();
-    this.currOp = 1;
+  public CraBlock(double decayFactor, int maxLists, long maximumSize, LatencyEstimator<Long> latencyEstimator) {
     this.data = new Long2ObjectOpenHashMap<>();
+
     this.lists = new Node[maxLists+1];
     for (int i = 0; i <= maxLists; i++) {
-      this.lists[i] = new Node(i);
+      this.lists[i] = new Node();
     }
-    this.resetCount = maximumSize;
+    this.activeLists = new HashSet<>();
+
+    this.maximumSize = maximumSize;
+    this.size = 0;
+
+    this.decayFactor = decayFactor;
     this.maxLists = maxLists;
-    this.lastReset = System.nanoTime();
-    this.reqCount = 0;
-    this.currentSize = 0;
-    this.k = k;
+    this.currOp = 1;
     this.latencyEstimator = latencyEstimator;
   }
-
-  public List<Long> record(AccessEvent event) {
-    final int weight = event.weight();
-    final long key = event.key();
-    Node old = data.get(key);
-    reqCount++;
-    if (reqCount > resetCount) {
-      reqCount = 0;
-      lastReset = System.nanoTime();
-      currOp >>= 1;
-    }
-    if (old == null) {
-      if (weight > maximumSize) {
-        return new ArrayList<>();
-      }
-      currentSize += weight;
-      return evict(event);
-    } else {
-      return onAccess(old);
-    }
-  }
-
 
   public void setNormalization(double normalizationBias, double normalizationFactor) {
     this.normalizationBias = normalizationBias;
@@ -107,47 +82,12 @@ public final class CraBlock {
     return listNum;
   }
 
-  /**
-   * Evicts while the map exceeds the maximum capacity.
-   */
-  public List<Long> evict(AccessEvent candidate) {
-    int listIndex;
-    Node victim;
-    Node inSentinel;
-    Node victimSent;
-    List<Long> evictions = new ArrayList<>();
-    long currKey;
-    listIndex = findList(candidate);
-    inSentinel = lists[listIndex];
-    if (currentSize > maximumSize) {
-      while (currentSize > maximumSize) {
-        victim = findVictim();
-        int victimListIndex = victim.sentinel.index;
-        currentSize -= victim.event.weight();
-        data.remove(victim.key);
-        currKey = victim.key;
-        victimSent = victim.sentinel;
-        victim.remove();
-        if (victimSent.size <= 0 && victimSent != inSentinel) {
-          activeLists.remove(victimListIndex);
-        }
-        evictions.add(currKey);
-      }
-      addToList(candidate, inSentinel);
-      activeLists.add(listIndex);
-      return evictions;
-    } else {
-      activeLists.add(listIndex);
-      addToList(candidate, inSentinel);
-      return new ArrayList<>();
-    }
-  }
-
   private Node addToList(AccessEvent candidate, Node inSentinel) {
-    Node node = new Node(candidate, candidate.weight(), inSentinel);
+    Node node = new Node(candidate, inSentinel);
     data.put(candidate.key(), node);
     node.appendToTail();
     node.updateOp(currOp++);
+    ++size;
     return node;
   }
 
@@ -156,6 +96,7 @@ public final class CraBlock {
     data.put(node.key, node);
     node.appendToTail();
     node.updateOp(currOp++);
+    ++size;
     return node;
   }
 
@@ -180,22 +121,26 @@ public final class CraBlock {
       double currDelta = latencyEstimator.getLatencyEstimation(currVictim.event.key());
       currMaxDelta = Math.max(currDelta, currMaxDelta);
 
-      if (currVictim.lastTouch < lastReset) {
-        currVictim.resetOp();
-      }
-
-      rank = Math.signum(currDelta) * Math.pow(Math.abs(currDelta), Math.pow((double) currOp - currVictim.lastOp, -k));
+      rank = Math.signum(currDelta) * Math.pow(Math.abs(currDelta), Math.pow((double) currOp - currVictim.lastOp, -decayFactor));
       if (rank < minRank || victim == null || (rank == minRank
               && (double) currVictim.lastOp / currOp < (double) victim.lastOp / currOp)) {
         minRank = rank;
         victim = currVictim;
       }
     }
-    checkState(victim != null, "CRA Block - maxlists: %s\n\n victim is null! activeLists = %s\nlists=%s", maxLists, java.util.Arrays.toString(activeLists.toArray()),java.util.Arrays.toString(lists));
+    checkState(victim != null,
+               "CRA Block - maxlists: %s\n\n victim is null! activeLists = %s\nlists=%s",
+               maxLists,
+               java.util.Arrays.toString(activeLists.toArray()),
+               java.util.Arrays.toString(lists));
+
     return victim;
   }
   public void remove(long key){
+    Node node = data.get(key);
+    node.remove();
     data.remove(key);
+    --size;
   }
 
   public Node addEntry(AccessEvent event){
@@ -214,38 +159,7 @@ public final class CraBlock {
     return data.containsKey(key);
   }
 
-  List<Long> onAccess(Node node) {
-    Node head = node.sentinel;
-    if (latencyEstimator.getDelta(node.event.key()) < 0) {
-      data.remove(node.key);
-      long key = node.key;
-      node.remove();
-      if (head.size <= 0) {
-        activeLists.remove(head.index);
-      }
-      List<Long> l = new ArrayList<>();
-      l.add(key);
-      return l;
-    } else {
-      int index = findList(node.event);
-      if (index != head.index){
-        node.remove();
-        if (head.size == 0) {
-          activeLists.remove(head.index);
-        }
-        node.sentinel = lists[index];
-        lists[index].size += 1;
-        node.moveToTail(currOp++);
-      } else {
-        node.moveToTail(currOp++);
-      }
-      return new ArrayList<>();
-    }
-  }
-  public String type() {
-    return (maxLists == 1) ? "LRU" : "LRBB";
-  }
-
+  public boolean isFull() { return size >= maximumSize; }
 
   /**
    * A node on the double-linked list.
@@ -257,35 +171,29 @@ public final class CraBlock {
     Node prev;
     Node next;
     long key;
-    int weight;
     AccessEvent event;
     long lastOp;
     long lastTouch;
-    double totalBenefit;
-    int index;
 
     /**
      * Creates a new sentinel node.
      */
-    public Node(int index) {
-      this.key = Long.MIN_VALUE;
+    public Node() {
       this.sentinel = this;
+      this.size = 0;
       this.prev = this;
       this.next = this;
+      this.key = Long.MIN_VALUE;
       this.event = null;
       this.lastOp = 1;
-      this.size = 0;
-      this.totalBenefit = 0;
-      this.index = index;
     }
 
     /**
      * Creates a new, unlinked node.
      */
-    public Node(AccessEvent event, int weight, Node sentinel) {
+    public Node(AccessEvent event, Node sentinel) {
       this.sentinel = sentinel;
       this.key = event.key();
-      this.weight = weight;
       this.event = event;
       this.lastOp = 1;
     }
@@ -307,50 +215,22 @@ public final class CraBlock {
      * Removes the node from the list.
      */
     public void remove() {
-      sentinel.size -= 1;
-      if (prev != null) {
-        prev.next = next;
-      }
+      checkState(prev != null && next != null, "Node already detached");
+      --sentinel.size;
 
-      if (next != null) {
-        next.prev = prev;
-      }
+      prev.next = next;
+      next.prev = prev;
 
-      prev = next = null;
+      prev = null;
+      next = null;
     }
 
     /**
      * Moves the node to the tail.
      */
     public void moveToTail() {
-      // unlink
-      prev.next = next;
-      next.prev = prev;
-
-      // link
-      next = sentinel;
-      prev = sentinel.prev;
-      sentinel.prev = this;
-      prev.next = this;
-
-    }
-
-    /**
-     * Moves the node to the tail.
-     */
-    public void moveToTail(long op) {
-      // unlink
-      prev.next = next;
-      next.prev = prev;
-
-      // link
-      next = sentinel;
-      prev = sentinel.prev;
-      sentinel.prev = this;
-      prev.next = this;
-      lastOp = op;
-      sentinel.updateOp(op);
-      lastTouch = System.nanoTime();
+      this.remove();
+      this.appendToTail();
     }
 
     /**
@@ -358,14 +238,6 @@ public final class CraBlock {
      */
     public void updateOp(long op) {
       lastOp = op;
-      lastTouch = System.nanoTime();
-    }
-
-    /**
-     * Updates the node's lastop without moving it
-     */
-    public void resetOp() {
-      lastOp = Math.max(1, lastOp >> 1);
       lastTouch = System.nanoTime();
     }
 
@@ -385,7 +257,6 @@ public final class CraBlock {
     public String toString() {
       return MoreObjects.toStringHelper(this)
               .add("key", key)
-              .add("weight", weight)
               .add("size",size)
               .toString();
     }
