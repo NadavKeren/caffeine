@@ -68,6 +68,7 @@ public final class PolicyActor extends AbstractBehavior<PolicyActor.Command> {
         policy.record(event);
         ++eventNum;
       } catch (RuntimeException e) {
+        System.err.println("Error on event: " + eventNumber);
         e.printStackTrace();
         System.out.println("Exception at event number: " + eventNum);
         System.exit(1);
