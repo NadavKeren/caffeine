@@ -25,8 +25,6 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.LatestLatencyE
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.TrueAverageEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.LAHillClimber.QueueType;
 import com.typesafe.config.Config;
-import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
-import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.LAHillClimber.AdaptationType;
 
@@ -47,26 +45,23 @@ import static java.util.stream.Collectors.toSet;
 public final class AdaptiveCAPolicy implements Policy {
 
   private final double initialPercentMain;
-  private final Long2ObjectMap<EntryData> data;
   private final PolicyStats policyStats;
   private final LAHillClimber climber;
   private final LatencyEstimator<Long> latencyEstimator;
   private final Admittor admittor;
-  private final long maximumSize;
+  private final long cacheCapacity;
 
   private final CraBlock probationBlock;
   private final CraBlock protectedBlock;
   private final CraBlock windowBlock;
 
-  private long maxWindow;
-  private long maxProtected;
+  private long windowCapacity;
+  private long protectedCapacity;
 
   private double windowSize;
   private double protectedSize;
 
-  static final boolean debug = false;
-  static final boolean trace = false;
-  double k;
+  static final boolean TRACE = false;
 
   private double normalizationBias;
   private double normalizationFactor;
@@ -76,23 +71,21 @@ public final class AdaptiveCAPolicy implements Policy {
 
 
   public AdaptiveCAPolicy(
-      LAHillClimberType strategy, double percentMain, AdaptiveCASettings settings,
-      double k, int maxLists) {
+          LAHillClimberType strategy, double percentMain, AdaptiveCASettings settings,
+          double decayFactor, int maxLists) {
     this.latencyEstimator = createEstimator(settings.config());
-    int maxMain = (int) (settings.maximumSize() * percentMain);
-    this.maxProtected = (int) (maxMain * settings.percentMainProtected());
-    this.maxWindow = settings.maximumSize() - maxMain;
-    this.data = new Long2ObjectOpenHashMap<>();
-    this.maximumSize = settings.maximumSize();
-    this.protectedBlock = new CraBlock(k, maxLists, this.maxProtected, latencyEstimator);
-    this.probationBlock = new CraBlock(k, maxLists, maxMain - this.maxProtected, latencyEstimator);
-    this.windowBlock = new CraBlock(k, maxLists, this.maxWindow, latencyEstimator);
+    this.cacheCapacity = settings.maximumSize();
+    int mainCacheCapacity = (int) (cacheCapacity * percentMain);
+    this.protectedCapacity = (int) (mainCacheCapacity * settings.percentMainProtected());
+    this.windowCapacity = cacheCapacity - mainCacheCapacity;
+    this.protectedBlock = new CraBlock(decayFactor, maxLists, this.protectedCapacity, latencyEstimator);
+    this.probationBlock = new CraBlock(decayFactor, maxLists, mainCacheCapacity - this.protectedCapacity, latencyEstimator);
+    this.windowBlock = new CraBlock(decayFactor, maxLists, this.windowCapacity, latencyEstimator);
     this.initialPercentMain = percentMain;
     this.policyStats = new PolicyStats("CAHillClimberWindow (%s)(k=%.2f,maxLists=%d)",
-            strategy.name().toLowerCase(US), k, maxLists);
+                                       strategy.name().toLowerCase(US), decayFactor, maxLists);
     this.admittor = new LATinyLfu(settings.config(), policyStats, latencyEstimator);
     this.climber = strategy.create(settings.config());
-    this.k = k;
     this.normalizationBias = 0;
     this.normalizationFactor = 0;
     this.maxDelta = 0;
@@ -153,46 +146,53 @@ public final class AdaptiveCAPolicy implements Policy {
 
   @Override
   public void record(AccessEvent event) {
-    long key = event.key();
-    boolean isFull = (data.size() >= maximumSize);
+    final long key = event.key();
     policyStats.recordOperation();
-    EntryData entry = data.get(key);
+    EntryData entry = null;
     admittor.record(event);
 
     QueueType queue = null;
-    if (entry == null) {
+    if (windowBlock.isHit(key)) {
+      entry = windowBlock.get(key);
+      onWindowHit(entry);
+      queue = QueueType.WINDOW;
+    } else if (probationBlock.isHit(key)) {
+      entry = probationBlock.get(key);
+      onProbationHit(entry);
+      queue = QueueType.PROBATION;
+    } else if (protectedBlock.isHit(key)) {
+      entry = protectedBlock.get(key);
+      onProtectedHit(entry);
+      queue = QueueType.PROTECTED;
+    } else {
       updateNormalization(event.key());
       onMiss(event);
+      latencyEstimator.record(event.key(), event.missPenalty());
       policyStats.recordMiss();
       policyStats.recordMissPenalty(event.missPenalty());
-    } else {
-      if (entry.event().isAvailableAt(event.getArrivalTime())) {
-        entry.event().updateHitPenalty(event.hitPenalty());
-        event.changeEventStatus(AccessEvent.EventStatus.HIT);
-        policyStats.recordHit();
-        policyStats.recordHitPenalty(event.hitPenalty());
-      } else {
-        event.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
-        event.setDelayedHitPenalty(entry.event().getAvailabilityTime());
-        policyStats.recordDelayedHit();
-        policyStats.recordDelayedHitPenalty(event.delayedHitPenalty());
-      }
-
-      if (windowBlock.isHit(key)) {
-        onWindowHit(entry);
-        queue = QueueType.WINDOW;
-      } else if (probationBlock.isHit(key)) {
-        onProbationHit(entry);
-        queue = QueueType.PROBATION;
-      } else if (protectedBlock.isHit(key)) {
-        onProtectedHit(entry);
-        queue = QueueType.PROTECTED;
-      } else {
-        throw new IllegalStateException();
-      }
     }
 
+    if (entry != null) {
+       recordAccordingToAvailability(entry, event);
+    }
+
+    final boolean isFull = (size() >= cacheCapacity);
     climb(event, queue, isFull);
+  }
+
+  private void recordAccordingToAvailability(EntryData entry, AccessEvent currEvent) {
+    boolean isAvailable = entry.event().isAvailableAt(currEvent.getArrivalTime());
+    if (isAvailable) {
+      currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
+      policyStats.recordHit();
+      policyStats.recordHitPenalty(currEvent.hitPenalty());
+    } else {
+      currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+      currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());
+      policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
+      policyStats.recordDelayedHit();
+      latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty());
+    }
   }
 
   private void updateNormalization(long key) {
@@ -224,9 +224,7 @@ public final class AdaptiveCAPolicy implements Policy {
    * Adds the entry to the admission window, evicting if necessary.
    */
   private void onMiss(AccessEvent event) {
-    long key = event.key();
-    EntryData entry = windowBlock.addEntry(event);
-    data.put(key, entry);
+    windowBlock.addEntry(event);
     windowSize++;
     evict();
   }
@@ -249,7 +247,7 @@ public final class AdaptiveCAPolicy implements Policy {
   }
 
   private void demoteProtected() {
-    if (protectedSize > maxProtected) {
+    if (protectedSize > protectedCapacity) {
       EntryData demote = protectedBlock.removeVictim();
       probationBlock.addEntry(demote);
       protectedSize--;
@@ -263,12 +261,14 @@ public final class AdaptiveCAPolicy implements Policy {
     protectedBlock.moveToTail(entry);
   }
 
+  private long size() { return windowBlock.size() + protectedBlock.size() + probationBlock.size(); }
+
   /**
    * Evicts from the admission window into the probation space. If the size exceeds the maximum,
    * then the admission candidate and probation's victim are evaluated and one is evicted.
    */
   private void evict() {
-    if (windowSize <= maxWindow) {
+    if (windowSize <= windowCapacity) {
       return;
     }
 
@@ -276,13 +276,12 @@ public final class AdaptiveCAPolicy implements Policy {
     windowSize--;
 
     probationBlock.addEntry(candidate);
-    if (data.size() > maximumSize) {
+    if (size() > cacheCapacity) {
       EntryData probationBlockVictim = probationBlock.findVictim();
       EntryData evict = admittor.admit(candidate.event(), probationBlockVictim.event())
                         ? probationBlockVictim
                         : candidate;
 
-      data.remove(evict.key());
       probationBlock.remove(evict.key());
       policyStats.recordEviction();
     }
@@ -298,7 +297,7 @@ public final class AdaptiveCAPolicy implements Policy {
       climber.onHit(event, queue, isFull);
     }
 
-    double probationSize = maximumSize - windowSize - protectedSize;
+    double probationSize = cacheCapacity - windowSize - protectedSize;
     LAHillClimber.Adaptation adaptation = climber
         .adapt(windowSize, probationSize, protectedSize, isFull);
     if (adaptation.type == AdaptationType.INCREASE_WINDOW) {
@@ -310,93 +309,81 @@ public final class AdaptiveCAPolicy implements Policy {
 
   private void increaseWindow(double amount) {
     checkState(amount >= 0.0);
-    if (maxProtected == 0) {
+    if (protectedCapacity == 0) {
       return;
     }
 
-    double quota = Math.min(amount, (double)maxProtected);
-    int steps = (int) (windowSize + quota) - (int) windowSize;
-    windowSize += quota;
+    double increaseAmount = Math.min(amount, (double) protectedCapacity);
+    int numOfItemsToMove = (int) (windowSize + increaseAmount) - (int) windowSize;
+    windowSize += increaseAmount;
 
-    for (int i = 0; i < steps; i++) {
-      maxWindow++;
-      maxProtected--;
+    for (int i = 0; i < numOfItemsToMove; i++) {
+      ++windowCapacity;
+      --protectedCapacity;
 
       demoteProtected();
       EntryData candidate = probationBlock.removeVictim();
       windowBlock.addEntry(candidate);
     }
     checkState(windowSize >= 0);
-    checkState(maxWindow >= 0);
-    checkState(maxProtected >= 0);
+    checkState(windowCapacity >= 0);
+    checkState(protectedCapacity >= 0);
 
-    if (trace) {
-      System.out.printf("+%,d (%,d -> %,d)%n", steps, maxWindow - steps, maxWindow);
+    if (TRACE) {
+      System.out.printf("+%,d (%,d -> %,d)%n", numOfItemsToMove, windowCapacity - numOfItemsToMove, windowCapacity);
     }
   }
 
   private void decreaseWindow(double amount) {
     checkState(amount >= 0.0);
-    if (maxWindow == 0) {
+    if (windowCapacity == 0) {
       return;
     }
 
     double quota = Math.min(amount, windowSize);
-    int steps = (int) Math.min((int) windowSize - (int) (windowSize - quota), maxWindow);
+    int steps = (int) Math.min((int) windowSize - (int) (windowSize - quota), windowCapacity);
     windowSize -= quota;
 
     for (int i = 0; i < steps; i++) {
-      maxWindow--;
-      maxProtected++;
+      windowCapacity--;
+      protectedCapacity++;
       EntryData candidate = windowBlock.removeVictim();
       probationBlock.addEntry(candidate);
     }
     checkState(windowSize >= 0);
-    checkState(maxWindow >= 0);
-    checkState(maxProtected >= 0);
+    checkState(windowCapacity >= 0);
+    checkState(protectedCapacity >= 0);
 
-    if (trace) {
-      System.out.printf("-%,d (%,d -> %,d)%n", steps, maxWindow + steps, maxWindow);
+    if (TRACE) {
+      System.out.printf("-%,d (%,d -> %,d)%n", steps, windowCapacity + steps, windowCapacity);
     }
   }
 
   private void printSegmentSizes() {
-    if (debug) {
+    if (TRACE) {
       System.out.printf(
-          "maxWindow=%d, maxProtected=%d, percentWindow=%.1f",
-          maxWindow, maxProtected, (100.0 * maxWindow) / maximumSize);
+              "maxWindow=%d, maxProtected=%d, percentWindow=%.1f",
+              windowCapacity, protectedCapacity, (100.0 * windowCapacity) / cacheCapacity);
     }
   }
 
   @Override
   public void finished() {
     policyStats.setPercentAdaption(
-            (maxWindow / (double) maximumSize) - (1.0 - initialPercentMain));
+            (windowCapacity / (double) cacheCapacity) - (1.0 - initialPercentMain));
     printSegmentSizes();
 
-    long actualWindowSize = data.values().stream().filter(n -> windowBlock.isHit(n.key())).count();
-    long actualProbationSize = data.values().stream().filter(n -> probationBlock.isHit(n.key()))
-        .count();
-    long actualProtectedSize = data.values().stream().filter(n -> protectedBlock.isHit(n.key()))
-        .count();
-    long calculatedProbationSize = data.size() - actualWindowSize - actualProtectedSize;
+    checkState(Math.abs(windowSize - windowBlock.size()) < 2,
+               "Window: %s != %s",
+               (long) windowSize,
+               windowBlock.size());
 
-    checkState(
-        (long) windowSize == actualWindowSize,
-        "Window: %s != %s",
-        (long) windowSize,
-        actualWindowSize);
-    checkState(
-        (long) protectedSize == actualProtectedSize,
-        "Protected: %s != %s",
-        (long) protectedSize,
-        actualProtectedSize);
-    checkState(
-        actualProbationSize == calculatedProbationSize,
-        "Probation: %s != %s",
-        actualProbationSize,
-        calculatedProbationSize);
-    checkState(data.size() <= maximumSize, "Maximum: %s > %s", data.size(), maximumSize);
+    checkState(Math.abs(protectedSize - protectedBlock.size()) < 2,
+               "Protected: %s != %s",
+               (long) protectedSize,
+               protectedBlock.size());
+
+    checkState(size() <= cacheCapacity, "Maximum: %s > %s", size(), cacheCapacity);
   }
 
   private static final class AdaptiveCASettings extends BasicSettings {

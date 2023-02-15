@@ -164,8 +164,13 @@ public final class CraBlock {
 
   public EntryData removeVictim() {
     Node victim = getVictim();
+    EntryData res = victim.data;
     remove(victim.key());
-    return victim.data;
+    return res;
+  }
+
+  public EntryData get(long key) {
+    return data.get(key).data();
   }
 
   public boolean isHit(long key){
@@ -179,7 +184,11 @@ public final class CraBlock {
     node.moveToTail();
   }
 
-  public boolean isFull() { return size >= maximumSize; }
+  public boolean isFull() { return size > maximumSize; }
+
+  public long size() { return size; }
+
+  public long capacity() { return maximumSize; }
 
   /**
    * A node on the double-linked list.

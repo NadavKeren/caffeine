@@ -56,7 +56,7 @@ public interface LAHillClimber {
   Adaptation adapt(double windowSize, double probationSize, double protectedSize, boolean isFull);
 
   enum QueueType {
-    WINDOW, PROBATION, PROTECTED
+    WINDOW, PROBATION, PROTECTED, OTHER
   }
 
   /**
