@@ -62,7 +62,9 @@ import com.github.benmanes.caffeine.cache.simulator.policy.product.HazelcastPoli
 import com.github.benmanes.caffeine.cache.simulator.policy.product.OhcPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.product.TCachePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sampled.SampledPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowCostAwareWithBurstinessBlockPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowTinyLfuPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.AdaptiveCAWithBurstBlockPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.HillClimberWindowTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.feedback.FeedbackTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.feedback.FeedbackWindowTinyLfuPolicy;
@@ -186,6 +188,10 @@ public final class Registry {
     registerMany(RandomWindowTinyLfuPolicy.class, RandomWindowTinyLfuPolicy::policies);
     registerMany(FullySegmentedWindowTinyLfuPolicy.class,
         FullySegmentedWindowTinyLfuPolicy::policies);
+
+    registerMany(WindowCostAwareWithBurstinessBlockPolicy.class,
+                 WindowCostAwareWithBurstinessBlockPolicy::policies);
+    registerMany(AdaptiveCAWithBurstBlockPolicy.class, AdaptiveCAWithBurstBlockPolicy::policies);
 
     register(FeedbackTinyLfuPolicy.class, FeedbackTinyLfuPolicy::new);
     registerMany(FeedbackWindowTinyLfuPolicy.class, FeedbackWindowTinyLfuPolicy::policies);
