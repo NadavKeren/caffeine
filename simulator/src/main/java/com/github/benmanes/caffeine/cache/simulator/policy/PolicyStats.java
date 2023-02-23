@@ -56,6 +56,7 @@ public class PolicyStats {
   private double hitPenalty;
   private double delayedHitPenalty;
   private double missPenalty;
+  private double squaredPenalty;
   private long evictionCount;
   private long admittedCount;
   private long rejectedCount;
@@ -93,6 +94,7 @@ public class PolicyStats {
     addPercentMetric("Adaption", this::percentAdaption);
     addMetric("Average Miss Penalty", this::averageMissPenalty);
     addMetric("Average Penalty", this::averagePenalty);
+    addMetric("Standard Deviation", this::stdDev);
     addMetric("Steps", this::operationCount);
     addMetric("Time", this::stopwatch);
   }
@@ -165,10 +167,12 @@ public class PolicyStats {
 
   public void recordHitPenalty(double penalty) {
     hitPenalty += penalty;
+    squaredPenalty += penalty * penalty;
   }
 
   public void recordDelayedHitPenalty(double penalty) {
     delayedHitPenalty += penalty;
+    squaredPenalty += penalty * penalty;
   }
 
   public double hitPenalty() {
@@ -198,6 +202,7 @@ public class PolicyStats {
 
   public void recordMissPenalty(double penalty) {
     missPenalty += penalty;
+    squaredPenalty += penalty * penalty;
   }
 
   public double missPenalty() {
@@ -291,6 +296,8 @@ public class PolicyStats {
     long requestCount = requestCount();
     return (requestCount == 0) ? 0.0 : totalPenalty() / requestCount;
   }
+
+  public double stdDev() { return Math.sqrt(squaredPenalty / requestCount()); }
 
   public double averageHitPenalty() {
     return (hitCount == 0) ? 0.0 : hitPenalty / hitCount;
