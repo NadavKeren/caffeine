@@ -45,8 +45,8 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                                                    100 * (1.0d - percentMain),
                                                    decayFactor,
                                                    maxLists);
-        this.latencyEstimator = createEstimator(settings.config());
-        this.burstEstimator = new BurstLatencyEstimator<>();
+        this.latencyEstimator = createLatencyEstimator(settings);
+        this.burstEstimator = createBurstEstimator(settings);
         this.admittor = new LATinyLfu(settings.config(), policyStats, latencyEstimator);
 
         this.cacheCapacity = settings.maximumSize();
@@ -70,8 +70,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         this.samplesCount = 0;
     }
 
-    private LatencyEstimator<Long> createEstimator(Config config) {
-        BasicSettings settings = new BasicSettings(config);
+    private LatencyEstimator<Long> createLatencyEstimator(WindowCAWithBBSettings settings) {
         BasicSettings.LatencyEstimationSettings latencySettings = settings.latencyEstimationSettings();
         String estimationType = latencySettings.estimationType();
 
@@ -94,6 +93,23 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                    String.format("Created estimator of type %s, class: %s",
                                  estimationType,
                                  estimator.getClass().getName()));
+
+        return estimator;
+    }
+
+    private LatencyEstimator<Long> createBurstEstimator(WindowCAWithBBSettings settings) {
+        LatencyEstimator<Long> estimator;
+        String strategy = settings.burstEstimationStrategy();
+        switch (strategy) {
+            case "naive":
+                estimator = new NaiveBurstLatencyEstimator<>();
+                break;
+            case "moving-average":
+                estimator = new MovingAverageBurstLatencyEstimator<>(settings.smoothingFactor(), settings.numOfPartitions());
+                break;
+            default:
+                throw new IllegalStateException("Unknown strategy: " + strategy);
+        }
 
         return estimator;
     }
@@ -241,8 +257,8 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             policyStats.recordBurstBlockHit();
         } else {
             onMiss(event);
-            latencyEstimator.record(event.key(), event.missPenalty());
-            burstEstimator.record(event.key(), event.missPenalty());
+            latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
+            burstEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
             policyStats.recordMiss();
             policyStats.recordMissPenalty(event.missPenalty());
             updateNormalization(key);
@@ -260,13 +276,14 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
             policyStats.recordHit();
             policyStats.recordHitPenalty(currEvent.hitPenalty());
+            burstEstimator.addValueToRecord(currEvent.key(), 0, currEvent.getArrivalTime());
         } else {
             currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
             currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());
             policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
             policyStats.recordDelayedHit();
-            latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty());
-            burstEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty());
+            latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
+            burstEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
         }
     }
 
@@ -278,7 +295,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
     @Override
     public boolean isPenaltyAware() { return true; }
 
-    public static final class WindowCAWithBBSettings extends BasicSettings {
+    private static final class WindowCAWithBBSettings extends BasicSettings {
 
         public WindowCAWithBBSettings(Config config) {
             super(config);
@@ -291,7 +308,14 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         public double percentMainProtected() {
             return config().getDouble("ca-bb-window.percent-main-protected");
         }
+
         public double percentBurstBlock() { return config().getDouble("ca-bb-window.percent-burst-block"); }
+
+        public String burstEstimationStrategy() { return config().getString("ca-bb-window.burst-strategy"); }
+
+        public double smoothingFactor() { return config().getDouble("ca-bb-window.smoothing-factor"); }
+
+        public int numOfPartitions() { return config().getInt("ca-bb-window.number-of-partitions"); }
 
         public List<Integer> decayFactors() {
             return config().getIntList("ca-bb-window.cra.decayFactors");
