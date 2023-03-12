@@ -19,7 +19,7 @@ public class TrueAverageEstimator<KeyType> implements LatencyEstimator<KeyType> 
     }
 
     @Override
-    public void record(KeyType key, double value) {
+    public void record(KeyType key, double value, double recordTime) {
         AccumulatedValues acc = storedValues.get(key);
 
         logger.log(Logger.Level.DEBUG, String.format("Recording key %s", key));
@@ -36,13 +36,6 @@ public class TrueAverageEstimator<KeyType> implements LatencyEstimator<KeyType> 
     public double getLatencyEstimation(KeyType key) {
         return storedValues.get(key).getAverage();
     }
-
-    @Override
-    public double getDelta(KeyType key) { return getLatencyEstimation(key) - getCacheHitEstimation(); }
-
-
-    @Override
-    public double getCacheHitEstimation() { return 1; }
 
     private static class AccumulatedValues {
         private double sum;

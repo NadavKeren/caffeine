@@ -30,7 +30,7 @@ public class BucketLatencyEstimation<KeyType> implements LatencyEstimator<KeyTyp
     }
 
     @Override
-    public void record(KeyType key, double value) {
+    public void record(KeyType key, double value, double recordTime) {
         updateCount(key);
         for (var bucket : buckets) { // avoiding using java.lang.Math.log for finding the bucket
             if (bucket.isInRange(value)) {
@@ -57,12 +57,6 @@ public class BucketLatencyEstimation<KeyType> implements LatencyEstimator<KeyTyp
 
         return sum / count;
     }
-
-    @Override
-    public double getDelta(KeyType key) { return getLatencyEstimation(key) - getCacheHitEstimation(); }
-
-    @Override
-    public double getCacheHitEstimation() { return 1; }
 
     private void createBuckets(int numOfBuckets, double epsilon) {
         double minValue = MIN_RECORDABLE_VALUE;

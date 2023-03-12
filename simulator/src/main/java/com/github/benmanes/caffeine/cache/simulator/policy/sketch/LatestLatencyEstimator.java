@@ -15,7 +15,7 @@ public class LatestLatencyEstimator<KeyType> implements LatencyEstimator<KeyType
     }
 
     @Override
-    public void record(KeyType key, double value) {
+    public void record(KeyType key, double value, double recordTime) {
         storedValues.put(key, value);
     }
 
@@ -24,10 +24,4 @@ public class LatestLatencyEstimator<KeyType> implements LatencyEstimator<KeyType
         Double estimate = storedValues.get(key);
         return estimate != null ? estimate : getCacheHitEstimation();
     }
-
-    @Override
-    public double getDelta(KeyType key) { return getLatencyEstimation(key) - getCacheHitEstimation(); }
-
-    @Override
-    public double getCacheHitEstimation() { return 1; }
 }
