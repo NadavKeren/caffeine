@@ -230,7 +230,7 @@ public final class WindowCAPolicy implements Policy {
       onProtectedHit(entry);
     } else {
       onMiss(event);
-      latencyEstimator.record(event.key(), event.missPenalty());
+      latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
       policyStats.recordMiss();
       policyStats.recordMissPenalty(event.missPenalty());
       updateNormalization(key);
@@ -253,7 +253,7 @@ public final class WindowCAPolicy implements Policy {
       currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());
       policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
       policyStats.recordDelayedHit();
-      latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty());
+      latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
     }
   }
 

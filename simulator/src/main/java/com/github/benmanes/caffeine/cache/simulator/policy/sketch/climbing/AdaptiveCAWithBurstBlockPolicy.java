@@ -61,9 +61,11 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
     private int samplesCount;
 
 
-    public AdaptiveCAWithBurstBlockPolicy(
-            LAHillClimberType strategy, double percentMain, AdaptiveCAWithBBSettings settings,
-            double decayFactor, int maxLists) {
+    public AdaptiveCAWithBurstBlockPolicy(LAHillClimberType strategy,
+                                          double percentMain,
+                                          AdaptiveCAWithBBSettings settings,
+                                          double decayFactor,
+                                          int maxLists) {
         this.policyStats = new AdaptiveCAWithBBStats("sketch.AdaptiveCAWithBB (%s)(k=%.2f,maxLists=%d)",
                                                      strategy.name().toLowerCase(US),
                                                      decayFactor,
@@ -73,8 +75,8 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         this.burstBlockCapacity = (long) (cacheCapacity * settings.percentBurstBlock());
         this.nonBurstCacheCapacity = cacheCapacity - burstBlockCapacity;
 
-        this.latencyEstimator = createEstimator(settings.config());
-        this.burstEstimator = new BurstLatencyEstimator<>();
+        this.latencyEstimator = createLatencyEstimator(settings.config());
+        this.burstEstimator = createBurstEstimator(settings);
 
         int mainCacheCapacity = (int) (nonBurstCacheCapacity * percentMain);
         this.protectedCapacity = (int) (mainCacheCapacity * settings.percentMainProtected());
@@ -97,7 +99,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         printSegmentSizes();
     }
 
-    private LatencyEstimator<Long> createEstimator(Config config) {
+    private LatencyEstimator<Long> createLatencyEstimator(Config config) {
         BasicSettings settings = new BasicSettings(config);
         BasicSettings.LatencyEstimationSettings latencySettings = settings.latencyEstimationSettings();
         String estimationType = latencySettings.estimationType();
@@ -118,6 +120,23 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         }
 
 
+
+        return estimator;
+    }
+
+    private LatencyEstimator<Long> createBurstEstimator(AdaptiveCAWithBBSettings settings) {
+        LatencyEstimator<Long> estimator;
+        String strategy = settings.burstEstimationStrategy();
+        switch (strategy) {
+            case "naive":
+                estimator = new NaiveBurstLatencyEstimator<>();
+                break;
+            case "moving-average":
+                estimator = new MovingAverageBurstLatencyEstimator<>(settings.smoothingFactor(), settings.numOfPartitions());
+                break;
+            default:
+                throw new IllegalStateException("Unknown strategy: " + strategy);
+        }
 
         return estimator;
     }
@@ -180,8 +199,8 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         } else {
             updateNormalization(event.key());
             onMiss(event);
-            latencyEstimator.record(event.key(), event.missPenalty());
-            burstEstimator.record(event.key(), event.missPenalty());
+            latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
+            burstEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
             policyStats.recordMiss();
             policyStats.recordMissPenalty(event.missPenalty());
         }
@@ -200,13 +219,14 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
             currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
             policyStats.recordHit();
             policyStats.recordHitPenalty(currEvent.hitPenalty());
+            burstEstimator.addValueToRecord(currEvent.key(), 0, currEvent.getArrivalTime());
         } else {
             currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
             currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());
             policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
             policyStats.recordDelayedHit();
-            latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty());
-            burstEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty());
+            latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
+            burstEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
         }
     }
 
@@ -435,6 +455,12 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         public double percentBurstBlock() {
             return config().getDouble("ca-bb-hill-climber-window.percent-burst-block");
         }
+
+        public String burstEstimationStrategy() { return config().getString("ca-bb-hill-climber-window.burst-strategy"); }
+
+        public double smoothingFactor() { return config().getDouble("ca-bb-hill-climber-window.smoothing-factor"); }
+
+        public int numOfPartitions() { return config().getInt("ca-bb-hill-climber-window.number-of-partitions"); }
 
         public Set<LAHillClimberType> strategy() {
             return config().getStringList("ca-bb-hill-climber-window.strategy").stream()

@@ -167,7 +167,7 @@ public final class AdaptiveCAPolicy implements Policy {
     } else {
       updateNormalization(event.key());
       onMiss(event);
-      latencyEstimator.record(event.key(), event.missPenalty());
+      latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
       policyStats.recordMiss();
       policyStats.recordMissPenalty(event.missPenalty());
     }
@@ -191,7 +191,7 @@ public final class AdaptiveCAPolicy implements Policy {
       currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());
       policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
       policyStats.recordDelayedHit();
-      latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty());
+      latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
     }
   }
 
