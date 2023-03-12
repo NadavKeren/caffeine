@@ -10,9 +10,9 @@ public interface LatencyEstimator<KeyType> {
      * @param value The value to record in the estimator for future estimations
      * */
 
-    void record(KeyType key, double value);
+    void record(KeyType key, double value, double recordTime);
 
-    default void addValueToRecord(KeyType key, double value) {}
+    default void addValueToRecord(KeyType key, double value, double recordTime) {}
 
     /**
      *
@@ -21,7 +21,7 @@ public interface LatencyEstimator<KeyType> {
      */
     double getLatencyEstimation(KeyType key);
 
-    double getDelta(KeyType key);
+    default double getDelta(KeyType key) { return getLatencyEstimation(key) - getCacheHitEstimation(); }
 
-    double getCacheHitEstimation();
+    default double getCacheHitEstimation() { return 1; }
 }
