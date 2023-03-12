@@ -107,6 +107,9 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             case "moving-average":
                 estimator = new MovingAverageBurstLatencyEstimator<>(settings.smoothingFactor(), settings.numOfPartitions());
                 break;
+            case "random":
+                estimator = new RandomNaiveBurstEstimator<>(0.05);
+                break;
             default:
                 throw new IllegalStateException("Unknown strategy: " + strategy);
         }
