@@ -1,73 +1,57 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch;
 
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
-import it.unimi.dsi.fastutil.PriorityQueue;
-import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import it.unimi.dsi.fastutil.objects.ObjectHeapPriorityQueue;
-
-import java.util.Map;
+import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 
 final public class BurstBlock {
-    private Map<Long, Node> dataMap;
-    private PriorityQueue<Node> dataHeap; // This is a minimum heap
-    final private long maximumSize;
-    private long currSize;
+    private SearchableMinimumHeap<Long, EntryData> heap;
+    final private int maximumSize;
+    private int fetchCounter;
 
-    public BurstBlock(long maximumSize) {
-        this.dataMap = new Long2ObjectOpenHashMap<>();
-        this.dataHeap = new ObjectHeapPriorityQueue<>((o1, o2) -> (int)(o1.score() - o2.score()));
+    public BurstBlock(int maximumSize, LatencyEstimator<Long> estimator) {
+        this.heap = new SearchableMinimumHeap<>(maximumSize, (l1, l2) -> (int)(estimator.getLatencyEstimation(l1) - estimator.getLatencyEstimation(l2)));
         this.maximumSize = maximumSize;
-        this.currSize = 0;
+        this.fetchCounter = 0;
     }
 
     public void evict() {
-        Node item = dataHeap.dequeue();
-        dataMap.remove(item.key());
-        --currSize;
+        heap.extractMin();
     }
 
-    public void admit(EntryData entry, double score) {
+    public void admit(EntryData entry) {
         if (isFull()) {
             throw new IllegalArgumentException(); // TODO: nkeren: check if there is better exception for this
         }
-
-        Node admittedNode = new Node(entry, score);
-        dataMap.put(entry.key(), admittedNode);
-        dataHeap.enqueue(admittedNode);
-        ++currSize;
+        heap.insert(entry.key(), entry);
     }
 
     public boolean isHit(long key) {
-        return dataMap.containsKey(key);
+        return heap.contains(key);
+    }
+
+//    public void update(long key) {
+//        heap.update(key);
+//    }
+
+    private void update() {
+        heap.makeHeap();
+        fetchCounter = 0;
     }
 
     public EntryData get(long key) {
-        return dataMap.get(key).data();
+        ++fetchCounter;
+        return heap.get(key);
     }
 
-    public double getVictimScore() { return dataHeap.first().score(); }
-
-    public boolean isFull() { return currSize == maximumSize; }
-
-    private static class Node {
-        private EntryData data;
-        private double score;
-
-        public Node(EntryData entry, double score) {
-            this.data = entry;
-            this.score = score;
+    public EntryData getVictim() {
+        if (fetchCounter > 10 * maximumSize) {
+            update();
         }
 
-        public EntryData data() {
-            return data;
-        }
-
-        public long key() {
-            return data.key();
-        }
-
-        public double score() {
-            return score;
-        }
+        return heap.min().second();
     }
+
+    public boolean isFull() { return heap.size() == maximumSize; }
+
+    public void dump() { heap.dump(); }
 }

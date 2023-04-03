@@ -75,6 +75,7 @@ public final class PolicyActor extends AbstractBehavior<PolicyActor.Command> {
   }
 
   private Behavior<Command> finish() {
+    policy.dump();
     policy.finished();
     simulator.tell(new Stats(policy.stats()));
     return Behaviors.stopped();

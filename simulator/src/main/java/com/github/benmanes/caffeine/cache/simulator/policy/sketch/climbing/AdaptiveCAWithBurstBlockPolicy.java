@@ -46,7 +46,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
     private long windowCapacity;
     private long protectedCapacity;
 
-    private final long burstBlockCapacity;
+    private final int burstBlockCapacity;
     private final long nonBurstCacheCapacity;
 
     private double windowSize;
@@ -72,7 +72,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                                                      maxLists);
 
         this.cacheCapacity = settings.maximumSize();
-        this.burstBlockCapacity = (long) (cacheCapacity * settings.percentBurstBlock());
+        this.burstBlockCapacity = (int) (cacheCapacity * settings.percentBurstBlock());
         this.nonBurstCacheCapacity = cacheCapacity - burstBlockCapacity;
 
         this.latencyEstimator = createLatencyEstimator(settings.config());
@@ -85,7 +85,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         this.protectedBlock = new CraBlock(decayFactor, maxLists, this.protectedCapacity, latencyEstimator);
         this.probationBlock = new CraBlock(decayFactor, maxLists, mainCacheCapacity - this.protectedCapacity, latencyEstimator);
         this.windowBlock = new CraBlock(decayFactor, maxLists, this.windowCapacity, latencyEstimator);
-        this.burstBlock = new BurstBlock(this.burstBlockCapacity);
+        this.burstBlock = new BurstBlock(this.burstBlockCapacity, burstEstimator);
 
         this.initialPercentMain = percentMain;
         this.admittor = new LATinyLfu(settings.config(), policyStats, latencyEstimator);
@@ -132,7 +132,11 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                 estimator = new NaiveBurstLatencyEstimator<>();
                 break;
             case "moving-average":
-                estimator = new MovingAverageBurstLatencyEstimator<>(settings.smoothingFactor(), settings.numOfPartitions());
+                estimator = new MovingAverageBurstLatencyEstimator<>(settings.smoothUpFactor(),
+                                                                     settings.smoothDownFactor(),
+                                                                     settings.agingWindowSize(),
+                                                                     settings.ageSmoothFactor(),
+                                                                     settings.numOfPartitions());
                 break;
             default:
                 throw new IllegalStateException("Unknown strategy: " + strategy);
@@ -322,15 +326,16 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
             if (burstBlockCapacity > 0) {
                 final double evictScore =  burstEstimator.getLatencyEstimation(evict.key());
                 if (burstBlock.isFull()) {
-                    final double burstVictimScore = burstBlock.getVictimScore();
+                    final EntryData victimData = burstBlock.getVictim();
+                    final double burstVictimScore = burstEstimator.getLatencyEstimation(victimData.key());
 
                     if (evictScore >= burstVictimScore) {
                         burstBlock.evict();
-                        burstBlock.admit(evict, evictScore);
+                        burstBlock.admit(evict);
                         policyStats.recordEviction();
                     }
                 } else {
-                    burstBlock.admit(evict, evictScore);
+                    burstBlock.admit(evict);
                 }
             }
         }
@@ -458,7 +463,10 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
         public String burstEstimationStrategy() { return config().getString("ca-bb-hill-climber-window.burst-strategy"); }
 
-        public double smoothingFactor() { return config().getDouble("ca-bb-hill-climber-window.smoothing-factor"); }
+        public double smoothUpFactor() { return config().getDouble("ca-bb-hill-climber-window.smooth-up-factor"); }
+        public double smoothDownFactor() { return config().getDouble("ca-bb-hill-climber-window.smooth-down-factor"); }
+        public int agingWindowSize() { return config().getInt("ca-bb-hill-climber-window.aging-window-size"); }
+        public double ageSmoothFactor() { return config().getDouble("ca-bb-hill-climber-window.age-smoothing"); }
 
         public int numOfPartitions() { return config().getInt("ca-bb-hill-climber-window.number-of-partitions"); }
 

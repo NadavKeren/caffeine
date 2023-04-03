@@ -21,6 +21,8 @@ public interface LatencyEstimator<KeyType> {
      */
     double getLatencyEstimation(KeyType key);
 
+    default double getLatencyEstimation(KeyType key, double time) { return getLatencyEstimation(key); }
+
     default double getDelta(KeyType key) { return getLatencyEstimation(key) - getCacheHitEstimation(); }
 
     default double getCacheHitEstimation() { return 1; }
