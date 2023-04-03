@@ -4,8 +4,13 @@ import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 
 import static com.google.common.base.Preconditions.checkState;
 
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.logging.*;
+import java.time.ZoneId;
 
 /***
  * This estimator uses moving average in order to "age" the burst estimation.
@@ -18,24 +23,39 @@ import java.util.HashMap;
  *
  */
 public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstimator<KeyType> {
-    private static int INITIAL_SIZE = 1000000;
-    private static float LOAD_FACTOR = 2.0f;
+    private static Logger logger = null;
+    final private static boolean DEBUG = false;
+    final private static int INITIAL_SIZE = 1000000;
+    final private static float LOAD_FACTOR = 2.0f;
     protected Map<KeyType, Entry> storedValues;
-    final protected double smoothingFactor;
+    final protected double smoothDownFactor;
+    final protected double smoothUpFactor;
+    final protected long agingWindowSize;
+    final protected double ageSmoothingFactor;
     final protected int numOfPartitions;
 
-    public MovingAverageBurstLatencyEstimator(double smoothingFactor, int numOfPartitions) {
+    public MovingAverageBurstLatencyEstimator(double smoothUpFactor, double smoothDownFactor, long agingWindowSize, double ageSmoothingFactor, int numOfPartitions) {
         storedValues = new HashMap<>(INITIAL_SIZE, LOAD_FACTOR);
 
-        checkState(smoothingFactor >= 0 && smoothingFactor <= 1, "Illegal Smoothing-Factor, must be in the range [0, 1]");
+        checkState(smoothUpFactor >= 0 && smoothUpFactor <= 1,
+                   "Illegal Smoothing-Factor, must be in the range [0, 1]");
         checkState(numOfPartitions > 0, "Illegal number of Partitions");
-        this.smoothingFactor = smoothingFactor;
+        this.smoothDownFactor = smoothDownFactor;
+        this.smoothUpFactor = smoothUpFactor;
+        this.agingWindowSize = agingWindowSize;
+        this.ageSmoothingFactor = ageSmoothingFactor;
         this.numOfPartitions = numOfPartitions;
+
+        System.out.println(String.format("DF: %.3f UP: %.3f aging-window: %d ASF: %.4f partitions: %d", smoothDownFactor, smoothUpFactor, agingWindowSize, ageSmoothingFactor, numOfPartitions));
+
+        if (DEBUG) {
+            setLogger();
+        }
     }
 
     @Override
     public void record(KeyType key, double value, double recordTime) {
-        storedValues.put(key, new Entry(value, recordTime));
+        storedValues.put(key, new Entry(key, value, recordTime));
     }
 
     @Override
@@ -53,17 +73,39 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
         return storedValues.get(key).getMovingAverage();
     }
 
+    @Override
+    public double getLatencyEstimation(KeyType key, double time) {
+        Entry entry = storedValues.get(key);
+        if (entry == null) {
+            throw new IllegalArgumentException(String.format("Key %s was not present during update attempt", key));
+        }
+
+        int numOfTicks = entry.getNumberOfTicksSinceUpdate(time);
+        double estimation = entry.getMovingAverage();
+
+        if (numOfTicks > numOfPartitions * agingWindowSize) {
+            int numOfAgingDecays = (int) (numOfTicks / (numOfPartitions * agingWindowSize));
+
+            estimation = estimation * Math.pow(1 - ageSmoothingFactor, numOfAgingDecays);
+        }
+
+        return estimation;
+    }
+
     private class Entry {
-        private int[] arrivalCounters;
+        final KeyType key;
+        final private int[] arrivalCounters;
         final private double latency;
         private double lastTickTime;
         private int tick;
         final private double tickDuration;
         private double maxValueInWindow;
         private double movingAverage;
+        private long updateNum;
 
 
-        public Entry(double latency, double currTime) {
+        public Entry(KeyType key, double latency, double currTime) {
+            this.key = key;
             this.arrivalCounters = new int[numOfPartitions];
             arrivalCounters[0] = 1;
             this.lastTickTime = currTime;
@@ -74,6 +116,7 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
             this.latency = latency;
             this.maxValueInWindow = latency;
             this.movingAverage = 0;
+            this.updateNum = 0;
         }
 
         private double calculateEstimationOfCounters() {
@@ -87,9 +130,21 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
         }
 
         private void updateMovingAverage() {
-            movingAverage = movingAverage > 0
-                          ? (1 - smoothingFactor) * movingAverage + smoothingFactor * maxValueInWindow
-                          : maxValueInWindow;
+            if (maxValueInWindow > latency) {
+                if (DEBUG) {
+                    logger.warning(String.format("%s, %d, %.2f, %.2f%n",
+                                                 key.toString(),
+                                                 updateNum++,
+                                                 movingAverage,
+                                                 maxValueInWindow));
+                }
+
+                final double smoothFactor = movingAverage < maxValueInWindow ? smoothUpFactor : smoothDownFactor;
+
+                movingAverage = movingAverage > 0
+                                ? (1 - smoothFactor) * movingAverage + smoothFactor * (maxValueInWindow - latency)
+                                : maxValueInWindow;
+            }
             maxValueInWindow = 0;
         }
 
@@ -105,20 +160,33 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
             }
         }
 
-        public void onWindowEnd(double arrivalTime) {
+        private void updateCurrMax() {
+            updateCurrMax(0);
+        }
+
+        public void onWindowEnd(double arrivalTime, int numOfAgingDecays) {
+            if (numOfAgingDecays > 0) {
+                ageMovingAverage(numOfAgingDecays);
+            }
+
             updateMovingAverage();
 
             startNewWindow(arrivalTime);
         }
 
         public void addArrival(double value, double arrivalTime) {
-            int numberOfTicksSinceLastUpdate = (int)((arrivalTime - lastTickTime) / tickDuration);
+            int numberOfTicksSinceLastUpdate = getNumberOfTicksSinceUpdate(arrivalTime);
             if (numberOfTicksSinceLastUpdate > 0) {
-                moveCountersUp(numberOfTicksSinceLastUpdate);
+                for (int i = 0; i < Math.min(numberOfTicksSinceLastUpdate, numOfPartitions); ++i) {
+                    moveCountersUp();
+                    updateCurrMax();
+                }
+
                 tick += numberOfTicksSinceLastUpdate;
 
                 if (tick >= numOfPartitions) {
-                    onWindowEnd(arrivalTime);
+                    int numOfAgingDecays = (int) (numberOfTicksSinceLastUpdate / (numOfPartitions * agingWindowSize));
+                    onWindowEnd(arrivalTime, numOfAgingDecays);
                 } else {
                     lastTickTime = lastTickTime + numberOfTicksSinceLastUpdate * tickDuration;
                 }
@@ -128,26 +196,60 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
             updateCurrMax(value);
         }
 
+        private void ageMovingAverage(int numOfAgingDecays) {
+            movingAverage = movingAverage * Math.pow(1 - ageSmoothingFactor, numOfAgingDecays);
+        }
+
+        public int getNumberOfTicksSinceUpdate(double time) {
+            return (int) ((time - lastTickTime) / tickDuration);
+        }
+
         private void startNewWindow(double startTime) {
             lastTickTime = startTime;
             tick = 0;
             maxValueInWindow = 0;
         }
 
-        private void moveCountersUp(int numOfIndexes) {
-            if (numOfIndexes > numOfPartitions) {
-                numOfIndexes = numOfPartitions;
+        private void moveCountersUp() {
+            for (int idx = numOfPartitions - 1; idx > 0; --idx) {
+                this.arrivalCounters[idx] = arrivalCounters[idx - 1];
             }
 
-            for (int idx = numOfPartitions - 1; idx >= numOfIndexes; --idx) {
-                this.arrivalCounters[idx] = arrivalCounters[idx - numOfIndexes];
-            }
-
-            for (int idx = 0; idx < numOfIndexes; ++idx) {
-                arrivalCounters[idx] = 0;
-            }
+            arrivalCounters[0] = 0;
         }
 
-        public double getMovingAverage() { return movingAverage > 0 ? movingAverage : maxValueInWindow; }
+        public double getMovingAverage() {return movingAverage > 0 ? movingAverage : maxValueInWindow;}
+    }
+
+    private void setLogger() {
+        if (logger == null) {
+            logger = Logger.getLogger("");
+            LocalDateTime currentTime = LocalDateTime.now(ZoneId.systemDefault());
+            DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("dd-MM-HH-mm-ss");
+            logger.setLevel(Level.ALL);
+            var handlers = logger.getHandlers();
+            logger.removeHandler(handlers[0]);
+            try {
+                FileHandler fileHandler = new FileHandler(String.format("moving-average-updates-SD-%.1f-SU-%.1f-t-%s.log",
+                                                                        this.smoothDownFactor,
+                                                                        this.smoothUpFactor,
+                                                                        currentTime.format(timeFormatter)));
+                Formatter logFormatter = new Formatter() {
+                    @Override
+                    public String format(LogRecord record) {
+                        return record.getMessage();
+                    }
+                };
+
+                fileHandler.setFormatter(logFormatter);
+                fileHandler.setLevel(Level.ALL);
+                logger.setUseParentHandlers(false);
+                logger.addHandler(fileHandler);
+            } catch (IOException e) {
+                System.err.println("Error creating the log file handler");
+                e.printStackTrace();
+                System.exit(1);
+            }
+        }
     }
 }

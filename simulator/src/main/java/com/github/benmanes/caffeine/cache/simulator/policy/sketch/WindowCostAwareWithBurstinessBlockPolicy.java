@@ -51,7 +51,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
 
         this.cacheCapacity = settings.maximumSize();
 
-        final long burstCacheCapacity = (long) (settings.percentBurstBlock() * cacheCapacity);
+        final int burstCacheCapacity = (int) (settings.percentBurstBlock() * cacheCapacity);
         this.nonBurstCacheCapacity = cacheCapacity - burstCacheCapacity;
 
         final long mainCacheSize = (long) (nonBurstCacheCapacity * percentMain);
@@ -61,7 +61,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         this.protectedBlock = new CraBlock(decayFactor, maxLists, protectedCapacity, latencyEstimator);
         this.probationBlock = new CraBlock(decayFactor, maxLists, mainCacheSize - protectedCapacity, latencyEstimator);
         this.windowBlock = new CraBlock(decayFactor, maxLists, windowCapacity, latencyEstimator);
-        this.burstBlock = new BurstBlock(burstCacheCapacity);
+        this.burstBlock = new BurstBlock(burstCacheCapacity, burstEstimator);
 
         this.normalizationBias = 0;
         this.normalizationFactor = 0;
@@ -105,7 +105,11 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                 estimator = new NaiveBurstLatencyEstimator<>();
                 break;
             case "moving-average":
-                estimator = new MovingAverageBurstLatencyEstimator<>(settings.smoothingFactor(), settings.numOfPartitions());
+                estimator = new MovingAverageBurstLatencyEstimator<>(settings.smoothUpFactor(),
+                                                                     settings.smoothDownFactor(),
+                                                                     settings.agingWindowSize(),
+                                                                     settings.ageSmoothFactor(),
+                                                                     settings.numOfPartitions());
                 break;
             case "random":
                 estimator = new RandomNaiveBurstEstimator<>(0.05);
@@ -144,7 +148,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         event.changeEventStatus(AccessEvent.EventStatus.MISS);
         admittor.record(event);
         windowBlock.addEntry(event);
-        evict();
+        evict(event.getArrivalTime());
     }
 
     /**
@@ -203,7 +207,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
      * Evicts from the admission window into the probation space. If the size exceeds the maximum,
      * then the admission candidate and probation's victim are evaluated and one is evicted.
      */
-    private void evict() {
+    private void evict(double eventTime) {
         if (!windowBlock.isFull()) {
             return;
         }
@@ -218,17 +222,18 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
 
             probationBlock.remove(evict.key());
 
-            final double evictScore =  burstEstimator.getLatencyEstimation(evict.key());
+            final double evictScore =  burstEstimator.getLatencyEstimation(evict.key(), eventTime);
             if (burstBlock.isFull()) {
-                final double burstVictimScore = burstBlock.getVictimScore();
+                final EntryData burstVictim = burstBlock.getVictim();
+                final double burstVictimScore = burstEstimator.getLatencyEstimation(burstVictim.key(), eventTime);
 
                 if (evictScore >= burstVictimScore) {
                     burstBlock.evict();
-                    burstBlock.admit(evict, evictScore);
+                    burstBlock.admit(evict);
                     policyStats.recordEviction();
                 }
             } else {
-                burstBlock.admit(evict, evictScore);
+                burstBlock.admit(evict);
             }
         }
     }
@@ -242,6 +247,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         final long key = event.key();
         policyStats.recordOperation();
         EntryData entry = null;
+//        boolean isBurstBlockHit = false;
 
         if (windowBlock.isHit(key)) {
             entry = windowBlock.get(key);
@@ -258,6 +264,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         } else if (burstBlock.isHit(key)){
             entry = burstBlock.get(key);
             policyStats.recordBurstBlockHit();
+//            isBurstBlockHit = true;
         } else {
             onMiss(event);
             latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
@@ -270,6 +277,10 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         if (entry != null) {
             admittor.record(event.key());
             recordAccordingToAvailability(entry, event);
+
+//            if (isBurstBlockHit) {
+//                burstBlock.update(entry.key()); // This needs to happen after the estimation change
+//            }
         }
     }
 
@@ -289,6 +300,11 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             burstEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
         }
     }
+
+    @Override
+    public void dump() { burstBlock.dump(); }
+
+
 
     @Override
     public void finished() {
@@ -316,7 +332,11 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
 
         public String burstEstimationStrategy() { return config().getString("ca-bb-window.burst-strategy"); }
 
-        public double smoothingFactor() { return config().getDouble("ca-bb-window.smoothing-factor"); }
+        public double smoothUpFactor() { return config().getDouble("ca-bb-window.smooth-up-factor"); }
+        public double smoothDownFactor() { return config().getDouble("ca-bb-window.smooth-down-factor"); }
+
+        public int agingWindowSize() { return config().getInt("ca-bb-window.aging-window-size"); }
+        public double ageSmoothFactor() { return config().getDouble("ca-bb-window.age-smoothing"); }
 
         public int numOfPartitions() { return config().getInt("ca-bb-window.number-of-partitions"); }
 
