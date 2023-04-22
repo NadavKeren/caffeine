@@ -132,9 +132,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                 estimator = new NaiveBurstLatencyEstimator<>();
                 break;
             case "moving-average":
-                estimator = new MovingAverageBurstLatencyEstimator<>(settings.smoothUpFactor(),
-                                                                     settings.smoothDownFactor(),
-                                                                     settings.agingWindowSize(),
+                estimator = new MovingAverageBurstLatencyEstimator<>(settings.agingWindowSize(),
                                                                      settings.ageSmoothFactor(),
                                                                      settings.numOfPartitions());
                 break;
@@ -463,8 +461,6 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
         public String burstEstimationStrategy() { return config().getString("ca-bb-hill-climber-window.burst-strategy"); }
 
-        public double smoothUpFactor() { return config().getDouble("ca-bb-hill-climber-window.smooth-up-factor"); }
-        public double smoothDownFactor() { return config().getDouble("ca-bb-hill-climber-window.smooth-down-factor"); }
         public int agingWindowSize() { return config().getInt("ca-bb-hill-climber-window.aging-window-size"); }
         public double ageSmoothFactor() { return config().getDouble("ca-bb-hill-climber-window.age-smoothing"); }
 

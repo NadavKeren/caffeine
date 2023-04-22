@@ -28,27 +28,20 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
     final private static int INITIAL_SIZE = 1000000;
     final private static float LOAD_FACTOR = 2.0f;
     protected Map<KeyType, Entry> storedValues;
-    final protected double smoothDownFactor;
-    final protected double smoothUpFactor;
     final protected long agingWindowSize;
     final protected double ageSmoothingFactor;
     final protected int numOfPartitions;
 
-    public MovingAverageBurstLatencyEstimator(double smoothUpFactor, double smoothDownFactor, long agingWindowSize, double ageSmoothingFactor, int numOfPartitions) {
+    public MovingAverageBurstLatencyEstimator(long agingWindowSize, double ageSmoothingFactor, int numOfPartitions) {
         storedValues = new HashMap<>(INITIAL_SIZE, LOAD_FACTOR);
 
-        checkState(smoothUpFactor >= 0 && smoothUpFactor <= 1,
-                   "Illegal Smoothing-Factor, must be in the range [0, 1]");
         checkState(numOfPartitions > 0, "Illegal number of Partitions");
-        this.smoothDownFactor = smoothDownFactor;
-        this.smoothUpFactor = smoothUpFactor;
         this.agingWindowSize = agingWindowSize;
         this.ageSmoothingFactor = ageSmoothingFactor;
         this.numOfPartitions = numOfPartitions;
 
-        System.out.println(String.format("DF: %.3f UP: %.3f aging-window: %d ASF: %.4f partitions: %d", smoothDownFactor, smoothUpFactor, agingWindowSize, ageSmoothingFactor, numOfPartitions));
-
         if (DEBUG) {
+            System.out.println(String.format("Aging-window: %d ASF: %.4f partitions: %d", agingWindowSize, ageSmoothingFactor, numOfPartitions));
             setLogger();
         }
     }
@@ -70,7 +63,7 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
 
     @Override
     public double getLatencyEstimation(KeyType key) {
-        return storedValues.get(key).getMovingAverage();
+        return storedValues.get(key).getValue();
     }
 
     @Override
@@ -80,16 +73,7 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
             throw new IllegalArgumentException(String.format("Key %s was not present during update attempt", key));
         }
 
-        int numOfTicks = entry.getNumberOfTicksSinceUpdate(time);
-        double estimation = entry.getMovingAverage();
-
-        if (numOfTicks > numOfPartitions * agingWindowSize) {
-            int numOfAgingDecays = (int) (numOfTicks / (numOfPartitions * agingWindowSize));
-
-            estimation = estimation * Math.pow(1 - ageSmoothingFactor, numOfAgingDecays);
-        }
-
-        return estimation;
+        return entry.getValue(time);
     }
 
     private class Entry {
@@ -97,10 +81,12 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
         final private int[] arrivalCounters;
         final private double latency;
         private double lastTickTime;
+        private double lastUpdateTime;
         private int tick;
         final private double tickDuration;
+        final private double agingWindowDuration;
         private double maxValueInWindow;
-        private double movingAverage;
+        private double value;
         private long updateNum;
 
 
@@ -109,13 +95,15 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
             this.arrivalCounters = new int[numOfPartitions];
             arrivalCounters[0] = 1;
             this.lastTickTime = currTime;
+            this.lastUpdateTime = currTime;
             this.tick = 0;
 
             this.tickDuration = latency / numOfPartitions;
+            this.agingWindowDuration = latency * agingWindowSize;
 
             this.latency = latency;
             this.maxValueInWindow = latency;
-            this.movingAverage = 0;
+            this.value = 0;
             this.updateNum = 0;
         }
 
@@ -129,27 +117,25 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
             return res;
         }
 
-        private void updateMovingAverage() {
-            if (maxValueInWindow > latency) {
-                if (DEBUG) {
-                    logger.warning(String.format("%s, %d, %.2f, %.2f%n",
-                                                 key.toString(),
-                                                 updateNum++,
-                                                 movingAverage,
-                                                 maxValueInWindow));
-                }
-
-                final double smoothFactor = movingAverage < maxValueInWindow ? smoothUpFactor : smoothDownFactor;
-
-                movingAverage = movingAverage > 0
-                                ? (1 - smoothFactor) * movingAverage + smoothFactor * (maxValueInWindow - latency)
-                                : maxValueInWindow;
+        private void updateValue(double time) {
+            if (DEBUG) {
+                logger.warning(String.format("%s, %d, %.2f, %.2f%n",
+                                             key.toString(),
+                                             updateNum++,
+                                             value,
+                                             maxValueInWindow));
             }
+
+            if (maxValueInWindow > value) {
+                lastUpdateTime = time;
+                value = maxValueInWindow;
+            }
+
             maxValueInWindow = 0;
         }
 
         private void updateCurrMax(double value) {
-            if (movingAverage == 0) {
+            if (this.value == 0) {
                 maxValueInWindow += value;
             } else {
                 final double currEstimation = calculateEstimationOfCounters();
@@ -164,31 +150,28 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
             updateCurrMax(0);
         }
 
-        public void onWindowEnd(double arrivalTime, int numOfAgingDecays) {
-            if (numOfAgingDecays > 0) {
-                ageMovingAverage(numOfAgingDecays);
-            }
+        public void onWindowEnd(double arrivalTime) {
+            ageValue(arrivalTime);
 
-            updateMovingAverage();
+            updateValue(arrivalTime);
 
             startNewWindow(arrivalTime);
         }
 
         public void addArrival(double value, double arrivalTime) {
-            int numberOfTicksSinceLastUpdate = getNumberOfTicksSinceUpdate(arrivalTime);
-            if (numberOfTicksSinceLastUpdate > 0) {
-                for (int i = 0; i < Math.min(numberOfTicksSinceLastUpdate, numOfPartitions); ++i) {
+            int numberOfTicksSinceLastAddition = getNumberOfTicksSinceAddition(arrivalTime);
+            if (numberOfTicksSinceLastAddition > 0) {
+                for (int i = 0; i < Math.min(numberOfTicksSinceLastAddition, numOfPartitions); ++i) {
                     moveCountersUp();
                     updateCurrMax();
                 }
 
-                tick += numberOfTicksSinceLastUpdate;
+                tick += numberOfTicksSinceLastAddition;
 
                 if (tick >= numOfPartitions) {
-                    int numOfAgingDecays = (int) (numberOfTicksSinceLastUpdate / (numOfPartitions * agingWindowSize));
-                    onWindowEnd(arrivalTime, numOfAgingDecays);
+                    onWindowEnd(arrivalTime);
                 } else {
-                    lastTickTime = lastTickTime + numberOfTicksSinceLastUpdate * tickDuration;
+                    lastTickTime = lastTickTime + numberOfTicksSinceLastAddition * tickDuration;
                 }
             }
 
@@ -196,11 +179,16 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
             updateCurrMax(value);
         }
 
-        private void ageMovingAverage(int numOfAgingDecays) {
-            movingAverage = movingAverage * Math.pow(1 - ageSmoothingFactor, numOfAgingDecays);
+        private void ageValue(double time) {
+            int numOfAgingDecays = (int) ((time - lastUpdateTime) / agingWindowDuration);
+
+            if (numOfAgingDecays > 0) {
+                value *= Math.pow(1 - ageSmoothingFactor, numOfAgingDecays);
+                lastUpdateTime = time;
+            }
         }
 
-        public int getNumberOfTicksSinceUpdate(double time) {
+        public int getNumberOfTicksSinceAddition(double time) {
             return (int) ((time - lastTickTime) / tickDuration);
         }
 
@@ -218,7 +206,15 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
             arrivalCounters[0] = 0;
         }
 
-        public double getMovingAverage() {return movingAverage > 0 ? movingAverage : maxValueInWindow;}
+        public double getValue(double time) {
+            ageValue(time);
+
+            return value > 0 ? value : maxValueInWindow;
+        }
+
+        public double getValue() {
+            return value > 0 ? value : maxValueInWindow;
+        }
     }
 
     private void setLogger() {
@@ -230,9 +226,9 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
             var handlers = logger.getHandlers();
             logger.removeHandler(handlers[0]);
             try {
-                FileHandler fileHandler = new FileHandler(String.format("moving-average-updates-SD-%.1f-SU-%.1f-t-%s.log",
-                                                                        this.smoothDownFactor,
-                                                                        this.smoothUpFactor,
+                FileHandler fileHandler = new FileHandler(String.format("moving-average-updates-AW-%d-ASF-%.1f-t-%s.log",
+                                                                        this.agingWindowSize,
+                                                                        this.ageSmoothingFactor,
                                                                         currentTime.format(timeFormatter)));
                 Formatter logFormatter = new Formatter() {
                     @Override
