@@ -248,6 +248,7 @@ public final class WindowCAPolicy implements Policy {
       currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
       policyStats.recordHit();
       policyStats.recordHitPenalty(currEvent.hitPenalty());
+      latencyEstimator.recordHit(currEvent.hitPenalty());
     } else {
       currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
       currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());

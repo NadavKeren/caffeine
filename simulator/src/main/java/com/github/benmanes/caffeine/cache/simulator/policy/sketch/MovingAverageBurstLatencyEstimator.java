@@ -32,6 +32,8 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
     final protected double ageSmoothingFactor;
     final protected int numOfPartitions;
 
+    private double hitPenalty;
+
     public MovingAverageBurstLatencyEstimator(long agingWindowSize, double ageSmoothingFactor, int numOfPartitions) {
         storedValues = new HashMap<>(INITIAL_SIZE, LOAD_FACTOR);
 
@@ -39,6 +41,7 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
         this.agingWindowSize = agingWindowSize;
         this.ageSmoothingFactor = ageSmoothingFactor;
         this.numOfPartitions = numOfPartitions;
+        this.hitPenalty = 1;
 
         if (DEBUG) {
             System.out.println(String.format("Aging-window: %d ASF: %.4f partitions: %d", agingWindowSize, ageSmoothingFactor, numOfPartitions));
@@ -59,6 +62,16 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
         }
 
         entry.addArrival(value, recordTime);
+    }
+
+    @Override
+    public void recordHit(double value) {
+        this.hitPenalty = value;
+    }
+
+    @Override
+    public double getCacheHitEstimation() {
+        return this.hitPenalty;
     }
 
     @Override

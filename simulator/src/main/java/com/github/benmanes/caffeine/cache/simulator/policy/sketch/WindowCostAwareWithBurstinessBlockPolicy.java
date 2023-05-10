@@ -275,10 +275,6 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         if (entry != null) {
             admittor.record(event.key());
             recordAccordingToAvailability(entry, event);
-
-//            if (isBurstBlockHit) {
-//                burstBlock.update(entry.key()); // This needs to happen after the estimation change
-//            }
         }
     }
 
@@ -289,6 +285,9 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             policyStats.recordHit();
             policyStats.recordHitPenalty(currEvent.hitPenalty());
             burstEstimator.addValueToRecord(currEvent.key(), 0, currEvent.getArrivalTime());
+
+            latencyEstimator.recordHit(currEvent.hitPenalty());
+            burstEstimator.recordHit(currEvent.hitPenalty());
         } else {
             currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
             currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());

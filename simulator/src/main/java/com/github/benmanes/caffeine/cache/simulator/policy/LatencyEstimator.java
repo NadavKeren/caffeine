@@ -14,6 +14,8 @@ public interface LatencyEstimator<KeyType> {
 
     default void addValueToRecord(KeyType key, double value, double recordTime) {}
 
+    default void recordHit(double value) {}
+
     /**
      *
      * @param key A valid key that was recorded before.
