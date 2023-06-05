@@ -249,20 +249,19 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
 
         if (windowBlock.isHit(key)) {
             entry = windowBlock.get(key);
-            policyStats.recordWindowHit();
+            policyStats.recordWindowHit(event.missPenalty());
             onWindowHit(entry);
         } else if (probationBlock.isHit(key)) {
             entry = probationBlock.get(key);
-            policyStats.recordProbationHit();
+            policyStats.recordProbationHit(event.missPenalty());
             onProbationHit(entry);
         } else if (protectedBlock.isHit(key)) {
             entry = protectedBlock.get(key);
-            policyStats.recordProtectedHit();
+            policyStats.recordProtectedHit(event.missPenalty());
             onProtectedHit(entry);
         } else if (burstBlock.isHit(key)){
             entry = burstBlock.get(key);
-            policyStats.recordBurstBlockHit();
-//            isBurstBlockHit = true;
+            policyStats.recordBurstBlockHit(event.missPenalty());
         } else {
             onMiss(event);
             latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
@@ -348,6 +347,11 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         private long protectedHitCount = 0;
         private long probationHitCount = 0;
         private long burstBlockHitCount = 0;
+        private double windowBenefit = 0;
+        private double protectedBenefit = 0;
+        private double probationBenefit = 0;
+        private double burstBenefit = 0;
+        private double totalBenefit = 0;
 
         public WindowCAWithBBStats(String format, Object... args) {
             super(format, args);
@@ -355,16 +359,43 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             addMetric(Metric.of("Protected Hit Rate", (DoubleSupplier) this::protectedRate, PERCENT, true));
             addMetric(Metric.of("Probation Hit Rate", (DoubleSupplier) this::probationRate, PERCENT, true));
             addMetric(Metric.of("Burst Hit Rate", (DoubleSupplier) this::burstBlockRate, PERCENT, true));
+            addMetric(Metric.of("Window Benefit", (DoubleSupplier) this::windowBenefit, PERCENT, true));
+            addMetric(Metric.of("Protected Benefit", (DoubleSupplier) this::protectedBenefit, PERCENT, true));
+            addMetric(Metric.of("Probation Benefit", (DoubleSupplier) this::probationBenefit, PERCENT, true));
+            addMetric(Metric.of("Burst Benefit", (DoubleSupplier) this::burstBenefit, PERCENT, true));
         }
 
-        final public void recordWindowHit() { ++this.windowHitCount; }
-        final public void recordProtectedHit() { ++this.protectedHitCount; }
-        final public void recordProbationHit() { ++this.probationHitCount; }
-        final public void recordBurstBlockHit() { ++this.burstBlockHitCount; }
+        final public void recordWindowHit(double missPenalty) {
+            ++this.windowHitCount;
+            this.windowBenefit += missPenalty;
+            this.totalBenefit +=missPenalty;
+        }
+
+        final public void recordProtectedHit(double missPenalty) {
+            ++this.protectedHitCount;
+            this.protectedBenefit += missPenalty;
+            this.totalBenefit +=missPenalty;
+        }
+
+        final public void recordProbationHit(double missPenalty) {
+            ++this.probationHitCount;
+            this.probationBenefit += missPenalty;
+            this.totalBenefit +=missPenalty;
+        }
+
+        final public void recordBurstBlockHit(double missPenalty) {
+            ++this.burstBlockHitCount;
+            this.burstBenefit += missPenalty;
+            this.totalBenefit +=missPenalty;
+        }
 
         final protected double windowRate() { return (double) windowHitCount / requestCount(); }
         final protected double protectedRate() { return (double) protectedHitCount / requestCount(); }
         final protected double probationRate() { return (double) probationHitCount / requestCount(); }
         final protected double burstBlockRate() { return (double) burstBlockHitCount / requestCount(); }
+        final public double windowBenefit() { return windowBenefit / totalBenefit; }
+        final public double protectedBenefit() { return protectedBenefit / totalBenefit; }
+        final public double probationBenefit() { return probationBenefit / totalBenefit; }
+        final public double burstBenefit() { return burstBenefit / totalBenefit; }
     }
 }
