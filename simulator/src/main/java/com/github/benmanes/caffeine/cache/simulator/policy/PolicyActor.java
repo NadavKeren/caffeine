@@ -37,6 +37,7 @@ import akka.actor.typed.javadsl.Receive;
 public final class PolicyActor extends AbstractBehavior<PolicyActor.Command> {
   private final ActorRef<Simulator.Command> simulator;
   private final Policy policy;
+  private int eventNum = 0;
 
   public PolicyActor(ActorContext<Command> context,
       ActorRef<Simulator.Command> simulator, Policy policy) {
@@ -62,7 +63,15 @@ public final class PolicyActor extends AbstractBehavior<PolicyActor.Command> {
     for (AccessEvent event : events) {
       long priorMisses = policy.stats().missCount();
       long priorHits = policy.stats().hitCount();
-      policy.record(event);
+
+      try {
+        policy.record(event);
+        ++eventNum;
+      } catch (RuntimeException e) {
+        e.printStackTrace();
+        System.out.println("Exception at event number: " + eventNum);
+        System.exit(1);
+      }
 
       if (policy.stats().hitCount() > priorHits) {
         policy.stats().recordHitPenalty(event.hitPenalty());
