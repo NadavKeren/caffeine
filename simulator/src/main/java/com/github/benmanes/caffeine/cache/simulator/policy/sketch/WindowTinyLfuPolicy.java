@@ -53,21 +53,24 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  * @author ben.manes@gmail.com (Ben Manes)
  */
 @PolicySpec(name = "sketch.WindowTinyLfu")
-public final class WindowTinyLfuPolicy implements KeyOnlyPolicy {
-  private final Long2ObjectMap<Node> data;
-  private final PolicyStats policyStats;
-  private final Admittor admittor;
-  private final int maximumSize;
+public class WindowTinyLfuPolicy implements KeyOnlyPolicy {
+  protected final Long2ObjectMap<Node> data;
+  protected final PolicyStats policyStats;
+  protected final Admittor admittor;
+  protected final int maximumSize;
 
-  private final Node headWindow;
-  private final Node headProbation;
-  private final Node headProtected;
+  protected final Node headWindow;
+  protected final Node headProbation;
+  protected final Node headProtected;
 
-  private final int maxWindow;
-  private final int maxProtected;
+  protected int maxWindow;
+  protected int maxProtected;
 
-  private int sizeWindow;
-  private int sizeProtected;
+  final protected int maxProbation;
+
+  protected int sizeWindow;
+  protected int sizeProtected;
+  protected int sizeProbation;
 
   public WindowTinyLfuPolicy(double percentMain, WindowTinyLfuSettings settings) {
     this.policyStats = new PolicyStats(name() + " (%.0f%%)", 100 * (1.0d - percentMain));
@@ -76,12 +79,48 @@ public final class WindowTinyLfuPolicy implements KeyOnlyPolicy {
 
     int maxMain = (int) (maximumSize * percentMain);
     this.maxProtected = (int) (maxMain * settings.percentMainProtected());
+    this.maxProbation = maxMain - maxProtected;
     this.data = new Long2ObjectOpenHashMap<>();
     this.maxWindow = maximumSize - maxMain;
     this.headProtected = new Node();
     this.headProbation = new Node();
     this.headWindow = new Node();
   }
+
+  public WindowTinyLfuPolicy(int maxMain, int maximumSize, WindowTinyLfuSettings settings, PolicyStats stats) {
+    this.maximumSize = maximumSize;
+    this.policyStats = stats;
+    this.admittor = new TinyLfu(settings.config(), policyStats);
+
+    this.maxProtected = (int) (maxMain * settings.percentMainProtected());
+    this.maxProbation = maxMain - maxProtected;
+    this.data = new Long2ObjectOpenHashMap<>();
+    this.maxWindow = maximumSize - maxMain;
+    this.headProtected = new Node();
+    this.headProbation = new Node();
+    this.headWindow = new Node();
+  }
+
+  public WindowTinyLfuPolicy(Admittor admittor,
+                             int maximumSize,
+                             int maxProtected,
+                             int maxProbation,
+                             int maxWindow,
+                             PolicyStats stats) {
+    this.policyStats = stats;
+    this.admittor = admittor;
+    this.maximumSize = maximumSize;
+
+    this.maxProtected = maxProtected;
+    this.maxProbation = maxProbation;
+    this.data = new Long2ObjectOpenHashMap<>();
+    this.maxWindow = maxWindow;
+    this.headProtected = new Node();
+    this.headProbation = new Node();
+    this.headWindow = new Node();
+  }
+
+
 
   /** Returns all variations of this policy based on the configuration parameters. */
   public static Set<Policy> policies(Config config) {
@@ -143,12 +182,14 @@ public final class WindowTinyLfuPolicy implements KeyOnlyPolicy {
     node.appendToTail(headProtected);
 
     sizeProtected++;
+    sizeProbation--;
     if (sizeProtected > maxProtected) {
       Node demote = headProtected.next;
       demote.remove();
       demote.status = Status.PROBATION;
       demote.appendToTail(headProbation);
       sizeProtected--;
+      sizeProbation++;
     }
   }
 
@@ -174,11 +215,14 @@ public final class WindowTinyLfuPolicy implements KeyOnlyPolicy {
     candidate.status = Status.PROBATION;
     candidate.appendToTail(headProbation);
 
+    sizeProbation++;
+
     if (data.size() > maximumSize) {
       Node victim = headProbation.next;
       Node evict = admittor.admit(candidate.key, victim.key) ? victim : candidate;
       data.remove(evict.key);
       evict.remove();
+      sizeProbation--;
 
       policyStats.recordEviction();
     }
@@ -186,28 +230,32 @@ public final class WindowTinyLfuPolicy implements KeyOnlyPolicy {
 
   @Override
   public void finished() {
-    long windowSize = data.values().stream().filter(n -> n.status == Status.WINDOW).count();
-    long probationSize = data.values().stream().filter(n -> n.status == Status.PROBATION).count();
-    long protectedSize = data.values().stream().filter(n -> n.status == Status.PROTECTED).count();
+    long windowCount = data.values().stream().filter(n -> n.status == Status.WINDOW).count();
+    long probationCount = data.values().stream().filter(n -> n.status == Status.PROBATION).count();
+    long protectedCount = data.values().stream().filter(n -> n.status == Status.PROTECTED).count();
 
-    checkState(windowSize == sizeWindow);
-    checkState(protectedSize == sizeProtected);
-    checkState(probationSize == data.size() - windowSize - protectedSize);
+    checkState(windowCount == sizeWindow,
+             "Window size and amount of items in window mismatch: " + windowCount + " vs. " + sizeWindow);
+    checkState(protectedCount == sizeProtected,
+             "Protected size and amount of items in protected mismatch: " + protectedCount + " vs. " + sizeProtected);
+    checkState(probationCount == sizeProbation,
+             "Probation size and amount of items in probation mismatch: " + probationCount + " vs. "
+                     + sizeProbation);
 
     checkState(data.size() <= maximumSize);
   }
 
   enum Status {
-    WINDOW, PROBATION, PROTECTED
+    WINDOW, PROBATION, PROTECTED, NONE
   }
 
   /** A node on the double-linked list. */
-  static final class Node {
+  static protected class Node {
     final long key;
 
-    Status status;
-    Node prev;
-    Node next;
+    Status status = Status.NONE;
+    Node prev = null;
+    Node next = null;
 
     /** Creates a new sentinel node. */
     public Node() {
@@ -228,19 +276,35 @@ public final class WindowTinyLfuPolicy implements KeyOnlyPolicy {
     }
 
     /** Appends the node to the tail of the list. */
-    public void appendToTail(Node head) {
-      Node tail = head.prev;
-      head.prev = this;
+    public void appendToTail(Node sentinel) {
+      Node tail = sentinel.prev;
+      sentinel.prev = this;
       tail.next = this;
-      next = head;
+      next = sentinel;
       prev = tail;
+    }
+
+    public void appendToHead(Node sentinel) {
+      Node oldHead = sentinel.next;
+      sentinel.next = this;
+      oldHead.prev = this;
+      next = oldHead;
+      prev = sentinel;
     }
 
     /** Removes the node from the list. */
     public void remove() {
+      if (isEmpty()) {
+        throw new IllegalStateException("Trying to delete the sentinel");
+      }
+
       prev.next = next;
       next.prev = prev;
       next = prev = null;
+    }
+
+    public boolean isEmpty() {
+      return (next == this) && (prev == this);
     }
 
     @Override
