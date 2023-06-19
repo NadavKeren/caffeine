@@ -18,10 +18,16 @@ package com.github.benmanes.caffeine.cache.simulator;
 import static java.util.Objects.requireNonNull;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.FileHandler;
+import java.util.logging.Formatter;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 import java.util.stream.Stream;
 
 import org.apache.commons.lang3.mutable.MutableObject;
@@ -68,6 +74,8 @@ import akka.actor.typed.javadsl.Receive;
  * @author ben.manes@gmail.com (Ben Manes)
  */
 public final class Simulator extends AbstractBehavior<Simulator.Command> {
+  private final static boolean DEBUG = true;
+  private final static Level loggingLevel = Level.ALL;
   private final List<ActorRef<PolicyActor.Command>> policies;
   private final TraceReader traceReader;
   private final BasicSettings settings;
@@ -170,8 +178,37 @@ public final class Simulator extends AbstractBehavior<Simulator.Command> {
     return this;
   }
 
+  private static void setLogger() {
+    Logger logger = Logger.getLogger("");
+    System.setProperty("java.util.logging.SimpleFormatter.format",
+            "%1$tF %1$tT %3$s - %4$s %5$s%6$s%n"); // %2$sq
+    LocalDateTime currentTime = LocalDateTime.now(ZoneId.systemDefault());
+    DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("dd-MM-HH-mm-ss");
+    logger.setLevel(loggingLevel);
+    var handlers = logger.getHandlers();
+    logger.removeHandler(handlers[0]);
+    try {
+      FileHandler fileHandler = new FileHandler("simulation-" + currentTime.format(timeFormatter) + ".log");
+      Formatter logFormatter = new SimpleFormatter();
+      fileHandler.setFormatter(logFormatter);
+      fileHandler.setLevel(loggingLevel);
+      logger.setUseParentHandlers(false);
+      logger.addHandler(fileHandler);
+      logger.log(Level.INFO, "Created the simulator");
+    } catch (IOException e) {
+      System.err.println("Error creating the log file handler");
+      e.printStackTrace();
+      System.exit(1);
+    }
+  }
+
   public static void main(String[] args) {
-    Logger.getLogger("").setLevel(Level.WARNING);
+    if (DEBUG) {
+      setLogger();
+    } else {
+      Logger.getLogger("").setLevel(Level.WARNING);
+    }
+
     var simulator = ActorSystem.create(Simulator.create(), "Simulator");
     simulator.tell(new Broadcast());
   }

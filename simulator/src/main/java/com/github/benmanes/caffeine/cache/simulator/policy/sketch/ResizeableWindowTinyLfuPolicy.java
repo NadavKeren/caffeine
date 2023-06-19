@@ -9,11 +9,13 @@ import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 
+import java.lang.System.Logger;
 
 @Policy.PolicySpec(name = "sketch.ResizableWindowTinyLfu")
 public class ResizeableWindowTinyLfuPolicy extends WindowTinyLfuPolicy {
-    private static int id = 0;
     final private static boolean DEBUG = true;
+    final private static Logger logger = System.getLogger(ResizeableWindowTinyLfuPolicy.class.getSimpleName());
+    private static int id = 0;
     final private int quantaSize;
     final private String name;
 
@@ -64,13 +66,13 @@ public class ResizeableWindowTinyLfuPolicy extends WindowTinyLfuPolicy {
     }
 
     protected ResizeableWindowTinyLfuPolicy(Admittor admittor,
-                                          int maximumSize,
-                                          int maxProtected,
-                                          int maxProbation,
-                                          int maxWindow,
-                                          PolicyStats stats,
-                                          int quantaSize,
-                                          String name) {
+                                            int maximumSize,
+                                            int maxProtected,
+                                            int maxProbation,
+                                            int maxWindow,
+                                            PolicyStats stats,
+                                            int quantaSize,
+                                            String name) {
         super(admittor, maximumSize, maxProtected, maxProbation, maxWindow, stats);
         this.quantaSize = quantaSize;
         this.name = name + "@" + id;
@@ -106,10 +108,11 @@ public class ResizeableWindowTinyLfuPolicy extends WindowTinyLfuPolicy {
         }
 
         if (DEBUG) {
-            System.out.printf("%s: Copied list %s with %d items%n",
-                              ConsoleColors.colorString(name, ConsoleColors.CYAN_BOLD),
-                              listType,
-                              items);
+            logger.log(Logger.Level.DEBUG,
+                       "%s: Copied list %s with %d items%n",
+                       ConsoleColors.colorString(name, ConsoleColors.CYAN_BOLD),
+                       listType,
+                       items);
         }
     }
 
@@ -139,19 +142,20 @@ public class ResizeableWindowTinyLfuPolicy extends WindowTinyLfuPolicy {
         }
 
         if (DEBUG) {
-            System.out.printf("%s: %s\tMoved %d items%n",
-                              ConsoleColors.colorString(name, ConsoleColors.CYAN_BOLD),
-                              ConsoleColors.colorString(
-                                      String.format(
-                                              "Decreased window to max of %d, current %d, protected max: %d with %d items, probation max: %d with %d items",
-                                              maxWindow,
-                                              sizeWindow,
-                                              maxProtected,
-                                              sizeProtected,
-                                              maxProbation,
-                                              sizeProbation),
-                                      ConsoleColors.PURPLE),
-                              itemsMoved);
+            logger.log(Logger.Level.DEBUG,
+                       "%s: %s\tMoved %d items%n",
+                       ConsoleColors.colorString(name, ConsoleColors.CYAN_BOLD),
+                       ConsoleColors.colorString(
+                               String.format(
+                                       "Decreased window to max of %d, current %d, protected max: %d with %d items, probation max: %d with %d items",
+                                       maxWindow,
+                                       sizeWindow,
+                                       maxProtected,
+                                       sizeProtected,
+                                       maxProbation,
+                                       sizeProbation),
+                               ConsoleColors.PURPLE),
+                       itemsMoved);
         }
 
         this.finished();
@@ -190,19 +194,20 @@ public class ResizeableWindowTinyLfuPolicy extends WindowTinyLfuPolicy {
         }
 
         if (DEBUG) {
-            System.out.printf(
-                    "%s: %s\tMoved %d items%n",
-                    ConsoleColors.colorString(name, ConsoleColors.CYAN_BOLD),
-                    ConsoleColors.colorString(
-                            String.format("Increased window to max of %d, current %d, protected max: %d with %d items, probation max: %d with %d items",
-                                          maxWindow,
-                                          sizeWindow,
-                                          maxProtected,
-                                          sizeProtected,
-                                          maxProbation,
-                                          sizeProbation),
-                            ConsoleColors.PURPLE),
-                    numOfItemsToMove);
+            logger.log(Logger.Level.DEBUG,
+                       "%s: %s\tMoved %d items%n",
+                       ConsoleColors.colorString(name, ConsoleColors.CYAN_BOLD),
+                       ConsoleColors.colorString(
+                               String.format(
+                                       "Increased window to max of %d, current %d, protected max: %d with %d items, probation max: %d with %d items",
+                                       maxWindow,
+                                       sizeWindow,
+                                       maxProtected,
+                                       sizeProtected,
+                                       maxProbation,
+                                       sizeProbation),
+                               ConsoleColors.PURPLE),
+                       numOfItemsToMove);
         }
 
         this.finished();
@@ -259,7 +264,8 @@ public class ResizeableWindowTinyLfuPolicy extends WindowTinyLfuPolicy {
         }
 
         public double timeframeHitRate() {
-            return this.timeframeOperationNumber() > 0 ? (double) this.timeframeHitCount / this.timeframeOperationNumber() : 0;
+            return this.timeframeOperationNumber() > 0 ? (double) this.timeframeHitCount
+                                                         / this.timeframeOperationNumber() : 0;
         }
 
         public int timeframeOperationNumber() {
@@ -271,7 +277,7 @@ public class ResizeableWindowTinyLfuPolicy extends WindowTinyLfuPolicy {
         }
 
         public double timeframeMissPenalty() {
-            return this.timeframeOperationNumber() > 0 ?  this.timeframeMissPenalty : Double.MAX_VALUE;
+            return this.timeframeOperationNumber() > 0 ? this.timeframeMissPenalty : Double.MAX_VALUE;
         }
     }
 
@@ -306,13 +312,13 @@ public class ResizeableWindowTinyLfuPolicy extends WindowTinyLfuPolicy {
         }
 
         @Override
-        public void increaseLFU() { }
+        public void increaseLFU() {}
 
         @Override
-        public void decreaseLFU() { }
+        public void decreaseLFU() {}
 
         @Override
-        public void resetStats() { }
+        public void resetStats() {}
 
         @Override
         public WindowTinyLFUStats getWindowStats() {
@@ -325,9 +331,9 @@ public class ResizeableWindowTinyLfuPolicy extends WindowTinyLfuPolicy {
         }
 
         @Override
-        public void record(long key) { }
+        public void record(long key) {}
 
         @Override
-        public void finished() { }
+        public void finished() {}
     }
 }

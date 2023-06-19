@@ -28,6 +28,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import java.lang.System.Logger;
+
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
@@ -56,6 +58,8 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 public final class HillClimberWindowTinyLfuPolicy implements KeyOnlyPolicy {
   private static final boolean debug = false;
   private static final boolean trace = false;
+
+  private static final Logger logger = System.getLogger(HillClimberWindowTinyLfuPolicy.class.getSimpleName());
 
   private final double initialPercentMain;
   private final Long2ObjectMap<Node> data;
@@ -249,6 +253,7 @@ public final class HillClimberWindowTinyLfuPolicy implements KeyOnlyPolicy {
 
     if (trace) {
       System.out.printf("+%,d (%,d -> %,d)%n", steps, maxWindow - steps, maxWindow);
+      logger.log(Logger.Level.INFO, "%d, %d, %d", maxWindow, maximumSize - maxWindow, maximumSize);
     }
   }
 
@@ -277,6 +282,7 @@ public final class HillClimberWindowTinyLfuPolicy implements KeyOnlyPolicy {
 
     if (trace) {
       System.out.printf("-%,d (%,d -> %,d)%n", steps, maxWindow + steps, maxWindow);
+      logger.log(Logger.Level.INFO, "%d, %d, %d", maxWindow, maximumSize - maxWindow, maximumSize);
     }
   }
 

@@ -12,11 +12,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import java.lang.System.Logger;
+
 import static java.util.stream.Collectors.toSet;
 
 @Policy.PolicySpec(name = "sketch.GhostClimberTinyLFU")
 public class GhostHillClimberTinyLfuPolicy implements Policy {
     private final static boolean DEBUG = true;
+    private final static Logger logger = System.getLogger(GhostHillClimberTinyLfuPolicy.class.getSimpleName());
 
     private final static ResizeableWindowTinyLfuPolicy.Dummy DUMMY = new ResizeableWindowTinyLfuPolicy.Dummy();
     private final GhostClimberTinyLfuStats policyStats;
@@ -46,6 +49,15 @@ public class GhostHillClimberTinyLfuPolicy implements Policy {
 
         this.adaptionTimeframe = (int) (settings.adaptionMultiplier() * maximumSize);
         this.opsSinceAdaption = 0;
+
+        if (DEBUG) {
+            logger.log(Logger.Level.INFO,
+                       "Created cache with %d, %d, %d",
+                       this.mainCache.maxWindow,
+                       this.mainCache.maxProbation
+                       + this.mainCache.maxProtected,
+                       this.mainCache.maximumSize);
+        }
     }
 
     private void createGhostCaches() {
@@ -85,7 +97,7 @@ public class GhostHillClimberTinyLfuPolicy implements Policy {
 
         final double delta = bestHitRate - currentHitRate;
         if (DEBUG) {
-            System.out.println(ConsoleColors.colorString(String.format(
+            logger.log(Logger.Level.DEBUG, ConsoleColors.colorString(String.format(
                     "Smaller LFU: %.2f%% Bigger LFU: %.2f%% Main: %.2f%%",
                     smallerLFUHitRate * 100,
                     higherLFUHitRate * 100,
@@ -95,16 +107,26 @@ public class GhostHillClimberTinyLfuPolicy implements Policy {
         if (delta > 0) {
             if (bestHitRate == smallerLFUHitRate) {
                 if (DEBUG) {
-                    System.out.println(ConsoleColors.colorString("Decreasing LFU", ConsoleColors.YELLOW_BOLD));
+                    logger.log(Logger.Level.DEBUG,
+                               ConsoleColors.colorString("Decreasing LFU", ConsoleColors.YELLOW_BOLD));
                 }
 
                 this.mainCache.decreaseLFU();
             } else {
                 if (DEBUG) {
-                    System.out.println(ConsoleColors.colorString("Increasing LFU", ConsoleColors.YELLOW_BOLD));
+                    logger.log(Logger.Level.DEBUG,
+                               ConsoleColors.colorString("Increasing LFU", ConsoleColors.YELLOW_BOLD));
                 }
 
                 this.mainCache.increaseLFU();
+            }
+
+            if (DEBUG) {
+                logger.log(Logger.Level.INFO,
+                           "%d, %d, %d",
+                           this.mainCache.maxWindow,
+                           this.mainCache.maxProbation + this.mainCache.maxProtected,
+                           this.mainCache.maximumSize);
             }
 
             createGhostCaches();
