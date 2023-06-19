@@ -33,6 +33,7 @@ import com.github.benmanes.caffeine.cache.simulator.parser.cloud_physics.CloudPh
 import com.github.benmanes.caffeine.cache.simulator.parser.corda.CordaTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.gradle.GradleTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.kaggle.OutbrainTraceReader;
+import com.github.benmanes.caffeine.cache.simulator.parser.key_only.SimpleKeyOnlyReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.lirs.LirsTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.lrb.LrbTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.scarab.ScarabTraceReader;
@@ -73,6 +74,7 @@ public enum TraceFormat {
   LRB(LrbTraceReader::new),
   OUTBRAIN(OutbrainTraceReader::new),
   SCARAB(ScarabTraceReader::new),
+  SIMPLE_KEY_ONLY(SimpleKeyOnlyReader::new),
   SNIA_CAMBRIDGE(CambridgeTraceReader::new),
   SNIA_K5CLOUD(K5cloudTraceReader::new),
   SNIA_OBJECT_STORE(ObjectStoreTraceReader::new),

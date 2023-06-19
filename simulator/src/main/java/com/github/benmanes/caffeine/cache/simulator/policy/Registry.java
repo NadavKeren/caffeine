@@ -62,6 +62,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.product.HazelcastPoli
 import com.github.benmanes.caffeine.cache.simulator.policy.product.OhcPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.product.TCachePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sampled.SampledPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.GhostHillClimberTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.HillClimberWindowTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.feedback.FeedbackTinyLfuPolicy;
@@ -188,6 +189,7 @@ public final class Registry {
     registerMany(FeedbackWindowTinyLfuPolicy.class, FeedbackWindowTinyLfuPolicy::policies);
 
     registerMany(HillClimberWindowTinyLfuPolicy.class, HillClimberWindowTinyLfuPolicy::policies);
+    registerMany(GhostHillClimberTinyLfuPolicy.class, GhostHillClimberTinyLfuPolicy::policies);
 
     register(TinyCachePolicy.class, TinyCachePolicy::new);
     register(WindowTinyCachePolicy.class, WindowTinyCachePolicy::new);
