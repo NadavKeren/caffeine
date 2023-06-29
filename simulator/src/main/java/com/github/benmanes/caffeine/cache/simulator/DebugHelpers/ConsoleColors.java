@@ -1,5 +1,7 @@
 package com.github.benmanes.caffeine.cache.simulator.DebugHelpers;
 
+import com.google.errorprone.annotations.FormatMethod;
+
 public class ConsoleColors {
     public static final String RESET = "\033[0m";  // Text Reset
 
@@ -25,5 +27,25 @@ public class ConsoleColors {
 
     public static String colorString(String str, String color) {
         return color + str + RESET;
+    }
+
+    @FormatMethod
+    public static String errorString(String format, Object... args) {
+        return RED_BOLD + String.format(format, args) + RESET;
+    }
+
+    @FormatMethod
+    public static String majorInfoString(String format, Object... args) {
+        return PURPLE_BOLD + String.format(format, args) + RESET;
+    }
+
+    @FormatMethod
+    public static String infoString(String format, Object... args) {
+        return YELLOW_BOLD + String.format(format, args) + RESET;
+    }
+
+    @FormatMethod
+    public static String minorInfoString(String format, Object... args) {
+        return CYAN + String.format(format, args) + RESET;
     }
 }
