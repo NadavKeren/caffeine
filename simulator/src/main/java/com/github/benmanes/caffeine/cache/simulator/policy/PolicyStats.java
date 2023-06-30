@@ -179,6 +179,8 @@ public class PolicyStats {
     return hitPenalty;
   }
 
+  public double delayedHitPenalty() { return delayedHitPenalty; }
+
   public void recordMiss() {
     missCount++;
   }

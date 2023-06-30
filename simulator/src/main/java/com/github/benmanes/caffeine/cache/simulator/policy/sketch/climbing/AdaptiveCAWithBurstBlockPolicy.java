@@ -1,550 +1,600 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
-import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
-import com.github.benmanes.caffeine.cache.simulator.admission.LATinyLfu;
-import com.github.benmanes.caffeine.cache.simulator.policy.*;
-import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock;
-import com.github.benmanes.caffeine.cache.simulator.policy.sketch.*;
+import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.ConsoleColors;
+import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
+import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
+import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.GhostHillClimberTinyLfuPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.ResizableWindowCostAwareWithBurstinessBlockPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.ResizableWindowCostAwareWithBurstinessBlockPolicy.BlockType;
+import com.google.common.base.Stopwatch;
 import com.typesafe.config.Config;
 
-import java.util.HashSet;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.lang.System.Logger;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.function.DoubleSupplier;
+import java.util.Map;
 
-import static com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats.Metric.MetricType.PERCENT;
 import static com.google.common.base.Preconditions.checkState;
-import static java.util.Locale.US;
-import static java.util.stream.Collectors.toSet;
-
-
-/**
- * The Adaptive Cost-Aware with additional Burst-Heavy items block.
- * The size of the admission window is adjusted using the latency
- * aware hill climbing algorithm.
- *
- * @author nadav.keren@gmail.com (Nadav Keren)
- */
 
 @Policy.PolicySpec(name = "sketch.AdaptiveCAWithBB")
 public class AdaptiveCAWithBurstBlockPolicy implements Policy {
+    private final static boolean DEBUG = true;
+    private final static Logger logger = System.getLogger(GhostHillClimberTinyLfuPolicy.class.getSimpleName());
+    private final static int NUM_OF_POSSIBLE_CACHES = 6;
 
-    private final double initialPercentMain;
-    private final AdaptiveCAWithBBStats policyStats;
-    private final LAHillClimber climber;
-    private final LatencyEstimator<Long> latencyEstimator;
-    private final LatencyEstimator<Long> burstEstimator;
-    private final Admittor admittor;
-    private final long cacheCapacity;
+    private final static ResizableWindowCostAwareWithBurstinessBlockPolicy DUMMY = new ResizableWindowCostAwareWithBurstinessBlockPolicy.Dummy();
+    private final AdaptiveCAWithBBStats stats;
+    private CacheCapacityState currCapacityState;
 
-    private final CraBlock probationBlock;
-    private final CraBlock protectedBlock;
-    private final CraBlock windowBlock;
-    private final BurstBlock burstBlock;
+    final private int adaptionTimeframe;
+    private int opsSinceAdaption;
+    private int adaptionNumber = 0;
+    private List<CacheCapacityState> capacityHistory;
 
-    private long windowCapacity;
-    private long protectedCapacity;
+    private final ResizableWindowCostAwareWithBurstinessBlockPolicy[] ghostCaches;
 
-    private final int burstBlockCapacity;
-    private final long nonBurstCacheCapacity;
+    private final ResizableWindowCostAwareWithBurstinessBlockPolicy mainCache;
 
-    private double windowSize;
-    private double protectedSize;
+    public AdaptiveCAWithBurstBlockPolicy(Config config) {
+        try {
+            var settings = new AdaptiveCAWithBBSettings(config);
+            int windowQuota = settings.lruQuota();
+            int protectedQuota = settings.protectedQuota();
+            int probationQuota = settings.probationQuota();
+            int burstQuota = settings.bcQuota();
+            int quantaCount = settings.numOfQuanta();
 
-    static final boolean TRACE = false;
+            currCapacityState = new CacheCapacityState(windowQuota, probationQuota + protectedQuota, burstQuota);
 
-    private double normalizationBias;
-    private double normalizationFactor;
-    private double maxDelta;
-    private int maxDeltaCounts;
-    private int samplesCount;
+            checkState(windowQuota >= 0 && probationQuota >= 0 && protectedQuota >= 0 && burstQuota >= 0,
+                       "Quotas must be non-negative");
+            checkState(windowQuota + probationQuota + protectedQuota + burstQuota == quantaCount,
+                       "Invalid settings - sum of quota mismatch");
 
+            int quantumSize = (int) (settings.maximumSize() / quantaCount);
+            this.adaptionTimeframe = (int) (settings.adaptionMultiplier() * settings.maximumSize());
 
-    public AdaptiveCAWithBurstBlockPolicy(LAHillClimberType strategy,
-                                          double percentMain,
-                                          AdaptiveCAWithBBSettings settings,
-                                          double decayFactor,
-                                          int maxLists) {
-        this.policyStats = new AdaptiveCAWithBBStats("sketch.AdaptiveCAWithBB (%s)(k=%.2f,maxLists=%d)",
-                                                     strategy.name().toLowerCase(US),
-                                                     decayFactor,
-                                                     maxLists);
+            stats = new AdaptiveCAWithBBStats("sketch.AdaptiveCAWithBB (LRU:%d, LFU: %d, BC:%d",
+                                              windowQuota,
+                                              protectedQuota + probationQuota,
+                                              burstQuota);
 
-        this.cacheCapacity = settings.maximumSize();
-        this.burstBlockCapacity = (int) (cacheCapacity * settings.percentBurstBlock());
-        this.nonBurstCacheCapacity = cacheCapacity - burstBlockCapacity;
+            mainCache = new ResizableWindowCostAwareWithBurstinessBlockPolicy(windowQuota,
+                                                                              probationQuota,
+                                                                              protectedQuota,
+                                                                              burstQuota,
+                                                                              quantumSize,
+                                                                              config,
+                                                                              "main");
 
-        this.latencyEstimator = createLatencyEstimator(settings.config());
-        this.burstEstimator = createBurstEstimator(settings);
+            stats.attachMainStats(mainCache.stats());
 
-        int mainCacheCapacity = (int) (nonBurstCacheCapacity * percentMain);
-        this.protectedCapacity = (int) (mainCacheCapacity * settings.percentMainProtected());
-        this.windowCapacity = nonBurstCacheCapacity - mainCacheCapacity;
+            ghostCaches = new ResizableWindowCostAwareWithBurstinessBlockPolicy[NUM_OF_POSSIBLE_CACHES];
+            createGhostCaches();
+            capacityHistory = new ArrayList<>();
+            capacityHistory.add(currCapacityState);
 
-        this.protectedBlock = new CraBlock(decayFactor, maxLists, this.protectedCapacity, latencyEstimator);
-        this.probationBlock = new CraBlock(decayFactor, maxLists, mainCacheCapacity - this.protectedCapacity, latencyEstimator);
-        this.windowBlock = new CraBlock(decayFactor, maxLists, this.windowCapacity, latencyEstimator);
-        this.burstBlock = new BurstBlock(this.burstBlockCapacity, burstEstimator);
-
-        this.initialPercentMain = percentMain;
-        this.admittor = new LATinyLfu(settings.config(), policyStats, latencyEstimator);
-        this.climber = strategy.create(settings.config());
-        this.normalizationBias = 0;
-        this.normalizationFactor = 0;
-        this.maxDelta = 0;
-        this.maxDeltaCounts = 0;
-        this.samplesCount = 0;
-
-        printSegmentSizes();
+            if (DEBUG) {
+                logger.log(Logger.Level.INFO,
+                           ConsoleColors.majorInfoString(
+                                   "Created Adaptive CA with BB; Starting quota: LRU: %d LFU: %d BC: %d\tQuantum Size: %d",
+                                   windowQuota,
+                                   probationQuota + protectedQuota,
+                                   burstQuota,
+                                   quantumSize));
+            }
+        } catch (RuntimeException e) {
+            e.printStackTrace();
+            System.exit(1);
+            throw new IllegalStateException(e.getMessage());
+        }
     }
 
-    private LatencyEstimator<Long> createLatencyEstimator(Config config) {
-        BasicSettings settings = new BasicSettings(config);
-        BasicSettings.LatencyEstimationSettings latencySettings = settings.latencyEstimationSettings();
-        String estimationType = latencySettings.estimationType();
-
-        LatencyEstimator<Long> estimator;
-        switch (estimationType) {
-            case "latest":
-                estimator = new LatestLatencyEstimator<>();
-                break;
-            case "true-average":
-                estimator = new TrueAverageEstimator<>();
-                break;
-            case "buckets":
-                estimator = new BucketLatencyEstimation<>(latencySettings.numOfBuckets(), latencySettings.epsilon());
-                break;
-            default:
-                throw new IllegalStateException("Unknown estimator type: " + estimationType);
+    private void createGhostCaches() {
+        if (DEBUG) {
+            logger.log(Logger.Level.INFO,
+                       ConsoleColors.infoString("creating ghost caches, adaption number %d", adaptionNumber));
         }
 
-
-
-        return estimator;
+        for (int i = 0; i < NUM_OF_POSSIBLE_CACHES; ++i) {
+            CacheConfiguration configuration = CacheConfiguration.fromIndex(i);
+            setGhostCache(i, configuration.increment(), configuration.decrement(), configuration.getName());
+        }
     }
 
-    private LatencyEstimator<Long> createBurstEstimator(AdaptiveCAWithBBSettings settings) {
-        LatencyEstimator<Long> estimator;
-        String strategy = settings.burstEstimationStrategy();
-        switch (strategy) {
-            case "naive":
-                estimator = new NaiveBurstLatencyEstimator<>();
+    private boolean checkIfChangePossible(BlockType increase, BlockType decrease) {
+        boolean condition;
+        switch (increase) {
+            case BC:
+                condition = mainCache.canExtendBC();
                 break;
-            case "moving-average":
-                estimator = new MovingAverageBurstLatencyEstimator<>(settings.agingWindowSize(),
-                                                                     settings.ageSmoothFactor(),
-                                                                     settings.numOfPartitions());
+            case LFU:
+                condition = mainCache.canExtendLFU();
+                break;
+            case LRU:
+                condition = mainCache.canExtendLRU();
                 break;
             default:
-                throw new IllegalStateException("Unknown strategy: " + strategy);
+                throw new IllegalStateException("No such block type");
         }
 
-        return estimator;
-    }
-
-    /**
-     * Returns all variations of this policy based on the configuration parameters.
-     */
-    public static Set<Policy> policies(Config config) {
-        AdaptiveCAWithBBSettings settings = new AdaptiveCAWithBBSettings(config);
-        Set<Policy> policies = new HashSet<>();
-        for (LAHillClimberType climber : settings.strategy()) {
-            for (double percentMain : settings.percentMain()) {
-                for (double decayFactor : settings.decayFactors()) {
-                    for (int maxNumOfLists : settings.maxLists()) {
-                        Policy policy = new AdaptiveCAWithBurstBlockPolicy(climber,
-                                                                           percentMain,
-                                                                           settings,
-                                                                           decayFactor,
-                                                                           maxNumOfLists);
-                        policies.add(policy);
-                    }
-                }
+        if (condition) {
+            switch (decrease) {
+                case BC:
+                    condition = mainCache.canShrinkBC();
+                    break;
+                case LFU:
+                    condition = mainCache.canShrinkLFU();
+                    break;
+                case LRU:
+                    condition = mainCache.canShrinkLRU();
+                    break;
+                default:
+                    throw new IllegalStateException("No such block type");
             }
         }
-        return policies;
+
+        return condition;
     }
 
-    @Override
-    public PolicyStats stats() {
-        return policyStats;
+    private void setGhostCache(int i, BlockType increase, BlockType decrease, String name) {
+        if (checkIfChangePossible(increase, decrease)) {
+            this.ghostCaches[i] = mainCache.createGhostCopy(name);
+            this.ghostCaches[i].changeSizes(increase, decrease);
+        } else {
+            this.ghostCaches[i] = DUMMY;
+        }
     }
 
     @Override
     public void record(AccessEvent event) {
-        final long key = event.key();
-        policyStats.recordOperation();
-        EntryData entry = null;
-        admittor.record(event);
-
-        LAHillClimber.QueueType queue = null;
-        if (windowBlock.isHit(key)) {
-            entry = windowBlock.get(key);
-            policyStats.recordWindowHit(event.missPenalty());
-            onWindowHit(entry);
-            queue = LAHillClimber.QueueType.WINDOW;
-        } else if (probationBlock.isHit(key)) {
-            entry = probationBlock.get(key);
-            policyStats.recordProbationHit(event.missPenalty());
-            onProbationHit(entry);
-            queue = LAHillClimber.QueueType.PROBATION;
-        } else if (protectedBlock.isHit(key)) {
-            entry = protectedBlock.get(key);
-            policyStats.recordProtectedHit(event.missPenalty());
-            onProtectedHit(entry);
-            queue = LAHillClimber.QueueType.PROTECTED;
-        } else if (burstBlock.isHit(key)) {
-            entry = burstBlock.get(key);
-            policyStats.recordBurstBlockHit(event.missPenalty());
-            queue = LAHillClimber.QueueType.OTHER;
-        } else {
-            updateNormalization(event.key());
-            onMiss(event);
-            latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
-            burstEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
-            policyStats.recordMiss();
-            policyStats.recordMissPenalty(event.missPenalty());
+//        final double hitPenaltyBefore = stats().hitPenalty();
+//        final double delayedHitPenaltyBefore = stats().delayedHitPenalty();
+//        final double missPenaltyBefore = stats().missPenalty();
+        this.mainCache.record(event);
+        for (int i = 0; i < NUM_OF_POSSIBLE_CACHES; ++i) {
+            this.ghostCaches[i].record(event);
         }
 
-        if (entry != null) {
-            recordAccordingToAvailability(entry, event);
+        ++opsSinceAdaption;
+
+        if (opsSinceAdaption >= adaptionTimeframe && mainCache.isFull()) {
+            opsSinceAdaption = 0;
+            adapt();
         }
 
-        final boolean isFull = (mainCacheSize() >= cacheCapacity);
-        climb(event, queue, isFull);
+//        final double hitPenaltyAfter = stats().hitPenalty();
+//        final double delayedHitPenaltyAfter = stats().delayedHitPenalty();
+//        final double missPenaltyAfter = stats().missPenalty();
+//
+//        checkState((hitPenaltyAfter > hitPenaltyBefore && delayedHitPenaltyAfter == delayedHitPenaltyBefore && missPenaltyAfter == missPenaltyBefore)
+//                   || (hitPenaltyAfter == hitPenaltyBefore && delayedHitPenaltyAfter > delayedHitPenaltyBefore && missPenaltyAfter == missPenaltyBefore)
+//                   || (hitPenaltyAfter == hitPenaltyBefore && delayedHitPenaltyAfter == delayedHitPenaltyBefore && missPenaltyAfter > missPenaltyBefore),
+//                   String.format("No stats update: Before: %.2f %.2f %.2f After: %.2f %.2f %.2f", hitPenaltyBefore, delayedHitPenaltyBefore, missPenaltyBefore, hitPenaltyAfter, delayedHitPenaltyAfter, missPenaltyAfter));
     }
 
-    private void recordAccordingToAvailability(EntryData entry, AccessEvent currEvent) {
-        boolean isAvailable = entry.event().isAvailableAt(currEvent.getArrivalTime());
-        if (isAvailable) {
-            currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
-            policyStats.recordHit();
-            policyStats.recordHitPenalty(currEvent.hitPenalty());
-            burstEstimator.addValueToRecord(currEvent.key(), 0, currEvent.getArrivalTime());
+    private void adapt() {
+        Adaption adaption = new Adaption(CacheConfiguration.MAIN,
+                                         this.mainCache.timeframeStats().timeframeAveragePenalty());
 
-            latencyEstimator.recordHit(currEvent.hitPenalty());
-            burstEstimator.recordHit(currEvent.hitPenalty());
-        } else {
-            currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
-            currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());
-            policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
-            policyStats.recordDelayedHit();
-            latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
-            burstEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
-        }
-    }
+        for (int i = 0; i < NUM_OF_POSSIBLE_CACHES; ++i) {
+            double avgPenalty = this.ghostCaches[i].timeframeStats().timeframeAveragePenalty();
 
-    private void updateNormalization(long key) {
-        double delta = latencyEstimator.getDelta(key);
-
-        if (delta > normalizationFactor){
-            ++samplesCount;
-            ++maxDeltaCounts;
-
-            maxDelta = (maxDelta * maxDeltaCounts + delta) / maxDeltaCounts;
-        }
-
-        normalizationBias = normalizationBias > 0
-                            ? Math.min(normalizationBias, Math.max(0, delta))
-                            : Math.max(0, delta);
-
-        if (samplesCount % 1000 == 0 || normalizationFactor == 0){
-            normalizationFactor = maxDelta;
-            maxDeltaCounts = 1;
-            samplesCount = 0;
-        }
-
-        protectedBlock.setNormalization(normalizationBias, normalizationFactor);
-        probationBlock.setNormalization(normalizationBias, normalizationFactor);
-        windowBlock.setNormalization(normalizationBias, normalizationFactor);
-    }
-
-    /**
-     * Adds the entry to the admission window, evicting if necessary.
-     */
-    private void onMiss(AccessEvent event) {
-        windowBlock.addEntry(event);
-        windowSize++;
-        evict();
-    }
-
-    /**
-     * Moves the entry to the MRU position in the admission window.
-     */
-    private void onWindowHit(EntryData entryData) {
-        windowBlock.moveToTail(entryData);
-    }
-
-    /**
-     * Promotes the entry to the protected region's MRU position, demoting an entry if necessary.
-     */
-    private void onProbationHit(EntryData entry) {
-        probationBlock.remove(entry.key());
-        protectedBlock.addEntry(entry);
-        protectedSize++;
-        demoteProtected();
-    }
-
-    private void demoteProtected() {
-        if (protectedSize > protectedCapacity) {
-            EntryData demote = protectedBlock.removeVictim();
-            probationBlock.addEntry(demote);
-            protectedSize--;
-        }
-    }
-
-    /**
-     * Moves the entry to the MRU position, if it falls outside the fast-path threshold.
-     */
-    private void onProtectedHit(EntryData entry) {
-        protectedBlock.moveToTail(entry);
-    }
-
-    private long mainCacheSize() { return windowBlock.size() + protectedBlock.size() + probationBlock.size(); }
-
-    /**
-     * Evicts from the admission window into the probation space. If the size exceeds the maximum,
-     * then the admission candidate and probation's victim are evaluated and one is evicted.
-     */
-    private void evict() {
-        if (!windowBlock.isFull()) {
-            return;
-        }
-
-        EntryData candidate = windowBlock.removeVictim();
-        --windowSize;
-
-        probationBlock.addEntry(candidate);
-        if (mainCacheSize() > nonBurstCacheCapacity) {
-            EntryData probationBlockVictim = probationBlock.findVictim();
-            EntryData evict = admittor.admit(candidate.event(), probationBlockVictim.event())
-                              ? probationBlockVictim
-                              : candidate;
-
-            probationBlock.remove(evict.key());
-
-            if (burstBlockCapacity > 0) {
-                final double evictScore =  burstEstimator.getLatencyEstimation(evict.key());
-                if (burstBlock.isFull()) {
-                    final EntryData victimData = burstBlock.getVictim();
-                    final double burstVictimScore = burstEstimator.getLatencyEstimation(victimData.key());
-
-                    if (evictScore >= burstVictimScore) {
-                        burstBlock.evict();
-                        burstBlock.admit(evict);
-                        policyStats.recordEviction();
-                    }
-                } else {
-                    burstBlock.admit(evict);
-                }
+            if (avgPenalty < adaption.avgPenalty()) {
+                adaption = new Adaption(CacheConfiguration.fromIndex(i), avgPenalty);
             }
-        }
-    }
 
-    /**
-     * Performs the hill climbing process.
-     */
-    private void climb(AccessEvent event, LAHillClimber.QueueType queue, boolean isFull) {
-        if (queue == null) {
-            climber.onMiss(event, isFull);
-        } else {
-            climber.onHit(event, queue, isFull);
+            this.ghostCaches[i].resetTimeframeStats();
         }
 
-        double probationSize = cacheCapacity - windowSize - protectedSize;
-        LAHillClimber.Adaptation adaptation = climber
-                .adapt(windowSize, probationSize, protectedSize, isFull);
-        if (adaptation.type == LAHillClimber.AdaptationType.INCREASE_WINDOW) {
-            increaseWindow(adaptation.amount);
-        } else if (adaptation.type == LAHillClimber.AdaptationType.DECREASE_WINDOW) {
-            decreaseWindow(adaptation.amount);
-        }
-    }
+        if (adaption.increment() != BlockType.NONE && adaption.decrement() != BlockType.NONE) {
+            if (DEBUG) {
+                logger.log(Logger.Level.INFO, ConsoleColors.majorInfoString("main: increasing %s over %s in adaption number %d", adaption.increment().name(), adaption.decrement().name(), adaptionNumber));
+            }
 
-    private void increaseWindow(double amount) {
-        checkState(amount >= 0.0);
-        if (protectedCapacity == 0) {
-            return;
-        }
+            var newCapacityState = CacheCapacityState.fromStateAndAdaptation(currCapacityState, adaption);
 
-        double increaseAmount = Math.min(amount, (double) protectedCapacity);
-        int numOfItemsToMove = (int) (windowSize + increaseAmount) - (int) windowSize;
-        windowSize += increaseAmount;
+            capacityHistory.add(newCapacityState);
+            currCapacityState = newCapacityState;
 
-        for (int i = 0; i < numOfItemsToMove; i++) {
-            ++windowCapacity;
-            --protectedCapacity;
+            this.mainCache.changeSizes(adaption.increment(), adaption.decrement());
+            this.mainCache.resetTimeframeStats();
 
-            demoteProtected();
-            EntryData candidate = probationBlock.removeVictim();
-            windowBlock.addEntry(candidate);
-        }
-        checkState(windowSize >= 0);
-        checkState(windowCapacity >= 0);
-        checkState(protectedCapacity >= 0);
+            if (DEBUG) {
+                logger.log(Logger.Level.INFO,
+                           ConsoleColors.majorInfoString(
+                                   "State after adaption num %d: LRU: %d LFU: %d BC: %d",
+                                   this.adaptionNumber,
+                                   mainCache.lruCapacity(),
+                                   mainCache.lfuCapacity(),
+                                   mainCache.bcCapacity()));
+            }
 
-        if (TRACE) {
-            System.out.printf("+%,d (%,d -> %,d)%n", numOfItemsToMove, windowCapacity - numOfItemsToMove, windowCapacity);
-        }
-    }
-
-    private void decreaseWindow(double amount) {
-        checkState(amount >= 0.0);
-        if (windowCapacity == 0) {
-            return;
+            createGhostCaches();
         }
 
-        double quota = Math.min(amount, windowSize);
-        int steps = (int) Math.min((int) windowSize - (int) (windowSize - quota), windowCapacity);
-        windowSize -= quota;
-
-        for (int i = 0; i < steps; i++) {
-            windowCapacity--;
-            protectedCapacity++;
-            EntryData candidate = windowBlock.removeVictim();
-            probationBlock.addEntry(candidate);
-        }
-        checkState(windowSize >= 0);
-        checkState(windowCapacity >= 0);
-        checkState(protectedCapacity >= 0);
-
-        if (TRACE) {
-            System.out.printf("-%,d (%,d -> %,d)%n", steps, windowCapacity + steps, windowCapacity);
-        }
-    }
-
-    private void printSegmentSizes() {
-        if (TRACE) {
-            System.out.printf(
-                    "maxWindow=%d, maxProtected=%d, percentWindow=%.1f",
-                    windowCapacity, protectedCapacity, (100.0 * windowCapacity) / cacheCapacity);
-        }
+        ++this.adaptionNumber;
     }
 
     @Override
     public void finished() {
-        policyStats.setPercentAdaption(
-                (windowCapacity / (double) cacheCapacity) - (1.0 - initialPercentMain));
-        printSegmentSizes();
+        mainCache.validateCapacity();
+        mainCache.validateSize();
 
-        checkState(Math.abs(windowSize - windowBlock.size()) < 2,
-                   "Window: %s != %s",
-                   (long) windowSize,
-                   windowBlock.size());
-
-        checkState(Math.abs(protectedSize - protectedBlock.size()) < 2,
-                   "Protected: %s != %s",
-                   (long) protectedSize,
-                   protectedBlock.size());
-
-        checkState(mainCacheSize() <= nonBurstCacheCapacity,
-                   "Maximum: %s > %s",
-                   mainCacheSize(),
-                   nonBurstCacheCapacity);
+        for (int i = 0; i < NUM_OF_POSSIBLE_CACHES; ++i) {
+            if (ghostCaches[i] != DUMMY) {
+                ghostCaches[i].validateCapacity();
+                ghostCaches[i].validateSize();
+            }
+        }
     }
 
-    private static final class AdaptiveCAWithBBSettings extends BasicSettings {
+    private PrintWriter prepareFileWriter() {
+        LocalDateTime currentTime = LocalDateTime.now(ZoneId.systemDefault());
+        DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("dd-MM-HH-mm-ss");
+        PrintWriter writer = null;
+        try {
+            FileWriter fwriter = new FileWriter("/tmp/naive-adaptive-adaptions-" + currentTime.format(timeFormatter) + ".dump", StandardCharsets.UTF_8);
+            writer = new PrintWriter(fwriter);
+        } catch (IOException e) {
+            System.err.println("Error creating the log file handler");
+            e.printStackTrace();
+            System.exit(1);
+        }
+
+        return writer;
+    }
+
+    @Override
+    public void dump() {
+        if (DEBUG) {
+            PrintWriter writer = prepareFileWriter();
+
+            for (var state: capacityHistory) {
+                writer.println(state.toString());
+            }
+
+            writer.close();
+        }
+    }
+
+    @Override
+    public PolicyStats stats() {
+        return stats;
+    }
+
+    @Override
+    public boolean isPenaltyAware() {
+        return true;
+    }
+
+    public static Policy policy(Config config) {
+        return new AdaptiveCAWithBurstBlockPolicy(config);
+    }
+
+    protected static class AdaptiveCAWithBBStats extends PolicyStats {
+        private PolicyStats mainStats = null;
+
+        public AdaptiveCAWithBBStats(String format, Object... args) {super(format, args);}
+
+        public void attachMainStats(PolicyStats mainStats) {
+            this.mainStats = mainStats;
+        }
+
+
+        @Override
+        public Map<String, Metric> metrics() {
+            return mainStats.metrics();
+        }
+
+        @Override
+        public Stopwatch stopwatch() {
+            return mainStats.stopwatch();
+        }
+
+        @Override
+        public String name() {
+            return mainStats.name();
+        }
+
+        @Override
+        public long operationCount() {
+            return mainStats.operationCount();
+        }
+
+        @Override
+        public long hitsWeight() {
+            return mainStats.hitsWeight();
+        }
+
+        @Override
+        public double hitPenalty() {
+            return mainStats.hitPenalty();
+        }
+
+        @Override
+        public double delayedHitPenalty() {
+            return mainStats.delayedHitPenalty();
+        }
+
+        @Override
+        public long missCount() {
+            return mainStats.missCount();
+        }
+
+        @Override
+        public long missesWeight() {
+            return mainStats.missesWeight();
+        }
+
+        @Override
+        public double missPenalty() {
+            return mainStats.missPenalty();
+        }
+
+        @Override
+        public long evictionCount() {
+            return mainStats.evictionCount();
+        }
+
+        @Override
+        public long requestCount() {
+            return mainStats.requestCount();
+        }
+
+        @Override
+        public long requestsWeight() {
+            return mainStats.requestsWeight();
+        }
+
+        @Override
+        public long admissionCount() {
+            return mainStats.admissionCount();
+        }
+
+        @Override
+        public long rejectionCount() {
+            return mainStats.rejectionCount();
+        }
+
+        @Override
+        public double totalPenalty() {
+            return mainStats.totalPenalty();
+        }
+
+        @Override
+        public double percentAdaption() {
+            return mainStats.percentAdaption();
+        }
+
+        @Override
+        public double hitRate() {
+            return mainStats.hitRate();
+        }
+
+        @Override
+        public double weightedHitRate() {
+            return mainStats.weightedHitRate();
+        }
+
+        @Override
+        public double missRate() {
+            return mainStats.missRate();
+        }
+
+        @Override
+        public double weightedMissRate() {
+            return mainStats.weightedMissRate();
+        }
+
+        @Override
+        public double delayedHitRate() {return mainStats.delayedHitRate();}
+
+        @Override
+        public double admissionRate() {
+            return mainStats.admissionRate();
+        }
+
+        @Override
+        public double complexity() {
+            return mainStats.complexity();
+        }
+
+        @Override
+        public double averagePenalty() {
+            return mainStats.averagePenalty();
+        }
+
+        @Override
+        public double averageHitPenalty() {
+            return mainStats.averageHitPenalty();
+        }
+
+        @Override
+        public double averageMissPenalty() {
+            return mainStats.averageMissPenalty();
+        }
+    }
+
+    protected static final class AdaptiveCAWithBBSettings extends BasicSettings {
+        final static String BASE_PATH = "adaptive-ca-bb";
 
         public AdaptiveCAWithBBSettings(Config config) {
             super(config);
         }
 
-        public List<Double> percentMain() {
-            return config().getDoubleList("ca-bb-hill-climber-window.percent-main");
+        public int probationQuota() {
+            return config().getInt(BASE_PATH + ".quota-probation");
         }
 
-        public double percentMainProtected() {
-            return config().getDouble("ca-bb-hill-climber-window.percent-main-protected");
+        public int protectedQuota() {
+            return config().getInt(BASE_PATH + ".quota-protected");
         }
 
-        public double percentBurstBlock() {
-            return config().getDouble("ca-bb-hill-climber-window.percent-burst-block");
+        public int lruQuota() {
+            return config().getInt(BASE_PATH + ".quota-window");
         }
 
-        public String burstEstimationStrategy() { return config().getString("ca-bb-hill-climber-window.burst-strategy"); }
-
-        public int agingWindowSize() { return config().getInt("ca-bb-hill-climber-window.aging-window-size"); }
-        public double ageSmoothFactor() { return config().getDouble("ca-bb-hill-climber-window.age-smoothing"); }
-
-        public int numOfPartitions() { return config().getInt("ca-bb-hill-climber-window.number-of-partitions"); }
-
-        public Set<LAHillClimberType> strategy() {
-            return config().getStringList("ca-bb-hill-climber-window.strategy").stream()
-                           .map(strategy -> strategy.replace('-', '_').toUpperCase(US))
-                           .map(LAHillClimberType::valueOf)
-                           .collect(toSet());
+        public int bcQuota() {
+            return config().getInt(BASE_PATH + ".quota-bc");
         }
 
-        public List<Integer> decayFactors() {
-            return config().getIntList("ca-bb-hill-climber-window.cra.decayFactors");
-        }
+        public int numOfQuanta() {return config().getInt(BASE_PATH + ".num-of-quanta");}
 
-        public List<Integer> maxLists() {
-            return config().getIntList("ca-bb-hill-climber-window.cra.max-lists");
+        public double adaptionMultiplier() {
+            return config().getDouble(BASE_PATH + ".adaption-multiplier");
         }
     }
 
-    protected static class AdaptiveCAWithBBStats extends PolicyStats {
-        private long windowHitCount = 0;
-        private long protectedHitCount = 0;
-        private long probationHitCount = 0;
-        private long burstBlockHitCount = 0;
-        private double windowBenefit = 0;
-        private double protectedBenefit = 0;
-        private double probationBenefit = 0;
-        private double burstBenefit = 0;
-        private double totalBenefit = 0;
+    private static class Adaption {
+        private final CacheConfiguration configuration;
+        private final double avgPenalty;
 
-
-
-
-        public AdaptiveCAWithBBStats(String format, Object... args) {
-            super(format, args);
-            addMetric(Metric.of("Window Hit Rate", (DoubleSupplier) this::windowRate, PERCENT, true));
-            addMetric(Metric.of("Protected Hit Rate", (DoubleSupplier) this::protectedRate, PERCENT, true));
-            addMetric(Metric.of("Probation Hit Rate", (DoubleSupplier) this::probationRate, PERCENT, true));
-            addMetric(Metric.of("Burst Hit Rate", (DoubleSupplier) this::burstBlockRate, PERCENT, true));
-            addMetric(Metric.of("Window Benefit", (DoubleSupplier) this::windowBenefit, PERCENT, true));
-            addMetric(Metric.of("Protected Benefit", (DoubleSupplier) this::protectedBenefit, PERCENT, true));
-            addMetric(Metric.of("Probation Benefit", (DoubleSupplier) this::probationBenefit, PERCENT, true));
-            addMetric(Metric.of("Burst Benefit", (DoubleSupplier) this::burstBenefit, PERCENT, true));
+        private Adaption(CacheConfiguration configuration, double avgPenalty) {
+            this.configuration = configuration;
+            this.avgPenalty = avgPenalty;
         }
 
-        final public void recordWindowHit(double missPenalty) {
-            ++this.windowHitCount;
-            this.windowBenefit += missPenalty;
-            this.totalBenefit +=missPenalty;
+        private BlockType decrement() {
+            return configuration.decrement();
         }
 
-        final public void recordProtectedHit(double missPenalty) {
-            ++this.protectedHitCount;
-            this.protectedBenefit += missPenalty;
-            this.totalBenefit +=missPenalty;
+        private BlockType increment() {
+            return configuration.increment();
         }
 
-        final public void recordProbationHit(double missPenalty) {
-            ++this.probationHitCount;
-            this.probationBenefit += missPenalty;
-            this.totalBenefit +=missPenalty;
+        private double avgPenalty() {
+            return avgPenalty;
+        }
+    }
+
+    private enum CacheConfiguration {
+        BIGGER_LFU_SMALLER_BC(0, "+LFU-BC", BlockType.LFU, BlockType.BC),
+        BIGGER_LFU_SMALLER_LRU(1, "+LFU-LRU", BlockType.LFU, BlockType.LRU),
+        BIGGER_LRU_SMALLER_BC(2, "+LRU-BC", BlockType.LRU, BlockType.BC),
+        BIGGER_LRU_SMALLER_LFU(3, "+LRU-LFU", BlockType.LRU, BlockType.LFU),
+        BIGGER_BC_SMALLER_LRU(4, "+BC-LRU", BlockType.BC, BlockType.LRU),
+        BIGGER_BC_SMALLER_LFU(5, "+BC-LFU", BlockType.BC, BlockType.LFU),
+        MAIN(Integer.MAX_VALUE, "main", BlockType.NONE, BlockType.NONE);
+
+        final private int index;
+        final private String name;
+        final private BlockType increment;
+        final private BlockType decrement;
+
+        private CacheConfiguration(int num, String name, BlockType increment, BlockType decrement) {
+            this.index = num;
+            this.name = name;
+            this.increment = increment;
+            this.decrement = decrement;
         }
 
-        final public void recordBurstBlockHit(double missPenalty) {
-            ++this.burstBlockHitCount;
-            this.burstBenefit += missPenalty;
-            this.totalBenefit +=missPenalty;
+        @SuppressWarnings("unused")
+        public int getIndex() {return index;}
+
+        public String getName() {return name;}
+
+        private BlockType increment() {
+            return increment;
         }
 
-        final protected double windowRate() { return (double) windowHitCount / requestCount(); }
+        private BlockType decrement() {
+            return decrement;
+        }
 
-        final protected double protectedRate() { return (double) protectedHitCount / requestCount(); }
-        final protected double probationRate() { return (double) probationHitCount / requestCount(); }
-        final protected double burstBlockRate() { return (double) burstBlockHitCount / requestCount(); }
+        public static CacheConfiguration fromIndex(int index) {
+            switch (index) {
+                case 0:
+                    return BIGGER_LFU_SMALLER_BC;
+                case 1:
+                    return BIGGER_LFU_SMALLER_LRU;
+                case 2:
+                    return BIGGER_LRU_SMALLER_BC;
+                case 3:
+                    return BIGGER_LRU_SMALLER_LFU;
+                case 4:
+                    return BIGGER_BC_SMALLER_LRU;
+                case 5:
+                    return BIGGER_BC_SMALLER_LFU;
+                default:
+                    throw new IllegalStateException("No such configuration");
+            }
+        }
+    }
 
-        final public double windowBenefit() { return windowBenefit / totalBenefit; }
-        final public double protectedBenefit() { return protectedBenefit / totalBenefit; }
-        final public double probationBenefit() { return probationBenefit / totalBenefit; }
-        final public double burstBenefit() { return burstBenefit / totalBenefit; }
+    private static class CacheCapacityState {
+        final private int lruCapacity;
+        final private int lfuCapacity;
+        final private int bcCapacity;
 
+        private CacheCapacityState(int lruCapacity, int lfuCapacity, int bcCapacity) {
+            this.lruCapacity = lruCapacity;
+            this.lfuCapacity = lfuCapacity;
+            this.bcCapacity = bcCapacity;
+        }
+
+        protected static CacheCapacityState fromStateAndAdaptation(CacheCapacityState state, Adaption adaption) {
+            int currentLRU = state.lruCapacity();
+            int currentLFU = state.lfuCapacity();
+            int currentBC = state.bcCapacity();
+
+            switch (adaption.increment()) {
+                case LRU:
+                    ++currentLRU;
+                    break;
+                case LFU:
+                    ++currentLFU;
+                    break;
+                case BC:
+                    ++currentBC;
+                    break;
+                case NONE:
+                default:
+                    throw new IllegalStateException("Bad adaption");
+            }
+
+            switch (adaption.decrement()) {
+                case LRU:
+                    --currentLRU;
+                    break;
+                case LFU:
+                    --currentLFU;
+                    break;
+                case BC:
+                    --currentBC;
+                    break;
+                case NONE:
+                default:
+                    throw new IllegalStateException("Bad adaption");
+            }
+
+            return new CacheCapacityState(currentLRU, currentLFU, currentBC);
+        }
+
+        private int lruCapacity() {
+            return lruCapacity;
+        }
+
+        private int lfuCapacity() {
+            return lfuCapacity;
+        }
+
+        private int bcCapacity() {
+            return bcCapacity;
+        }
+
+        @Override
+        public String toString() {
+            return lruCapacity + "," + lfuCapacity + "," + bcCapacity;
+        }
     }
 }

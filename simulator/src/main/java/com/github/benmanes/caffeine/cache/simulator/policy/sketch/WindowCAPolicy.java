@@ -57,19 +57,20 @@ public final class WindowCAPolicy implements Policy {
 
   private static final Logger logger = System.getLogger(LatencyEstimator.class.getName());
 
-  public WindowCAPolicy(double percentMain, WindowCASettings settings, int k,
+  public WindowCAPolicy(double percentMain, WindowCASettings settings, int decayFactor,
                         int maxLists) {
-    this.policyStats = new PolicyStats("sketch.WindowCATinyLfu (%.0f%%,k=%d,maxLists=%d)", 100 * (1.0d - percentMain), k,
-            maxLists);
+    this.policyStats = new PolicyStats("sketch.WindowCATinyLfu (%.0f%%,decayFactor=%d,maxLists=%d)", 100 * (1.0d - percentMain),
+                                       decayFactor,
+                                       maxLists);
     this.latencyEstimator = createEstimator(settings.config());
     this.admittor = new LATinyLfu(settings.config(), policyStats, latencyEstimator);
     int mainCacheSize = (int) (settings.maximumSize() * percentMain);
-    long protectedCapacity = (int) (mainCacheSize * settings.percentMainProtected());
-    long windowCapacity = settings.maximumSize() - mainCacheSize;
+    int protectedCapacity = (int) (mainCacheSize * settings.percentMainProtected());
+    int windowCapacity = (int) settings.maximumSize() - mainCacheSize;
     this.cacheCapacity = settings.maximumSize();
-    this.protectedBlock = new CraBlock(k, maxLists, protectedCapacity, latencyEstimator);
-    this.probationBlock = new CraBlock(k, maxLists, mainCacheSize - protectedCapacity, latencyEstimator);
-    this.windowBlock = new CraBlock(k, maxLists, windowCapacity, latencyEstimator);
+    this.protectedBlock = new CraBlock(decayFactor, maxLists, protectedCapacity, latencyEstimator, "protected-block");
+    this.probationBlock = new CraBlock(decayFactor, maxLists, mainCacheSize - protectedCapacity, latencyEstimator, "probation-block");
+    this.windowBlock = new CraBlock(decayFactor, maxLists, windowCapacity, latencyEstimator, "window-block");
     this.normalizationBias = 0;
     this.normalizationFactor = 0;
     this.maxDelta = 0;
@@ -100,7 +101,7 @@ public final class WindowCAPolicy implements Policy {
     logger.log(Logger.Level.DEBUG,
                String.format("Created estimator of type %s, class: %s",
                              estimationType,
-                             estimator.getClass().getName()));
+                             estimator.getClass().getSimpleName()));
 
     return estimator;
   }
@@ -110,13 +111,11 @@ public final class WindowCAPolicy implements Policy {
    */
   public static Set<Policy> policies(Config config) {
     WindowCASettings settings = new WindowCASettings(config);
+    int decayFactor = settings.decayFactor();
+    int maxLists = settings.maxLists();
+
     return settings.percentMain().stream()
-        .flatMap(percentMain ->
-            settings.kValues().stream()
-                .map(k -> settings.maxLists().stream()
-                                .map(ml -> new WindowCAPolicy(percentMain, settings, k,ml)
-                                )))
-        .flatMap(x -> x)
+        .map(percentMain -> new WindowCAPolicy(percentMain, settings, decayFactor, maxLists))
         .collect(toSet());
   }
 
@@ -209,7 +208,7 @@ public final class WindowCAPolicy implements Policy {
     }
   }
 
-  private long size() {
+  private int size() {
     return windowBlock.size() + protectedBlock.size() + probationBlock.size();
   }
 
@@ -284,12 +283,12 @@ public final class WindowCAPolicy implements Policy {
       return config().getDouble("ca-window.percent-main-protected");
     }
 
-    public List<Integer> kValues() {
-      return config().getIntList("ca-window.cra.k");
+    public int decayFactor() {
+      return config().getInt("ca-window.cra.decay-factor");
     }
 
-    public List<Integer> maxLists() {
-      return config().getIntList("ca-window.cra.max-lists");
+    public int maxLists() {
+      return config().getInt("ca-window.cra.max-lists");
     }
   }
 }

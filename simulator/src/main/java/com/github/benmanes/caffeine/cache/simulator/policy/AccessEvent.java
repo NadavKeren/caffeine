@@ -185,7 +185,7 @@ public class AccessEvent {
     }
 
     @Override
-    public boolean isAvailableAt(double time) { return (availabilityTime < time); }
+    public boolean isAvailableAt(double time) { return (availabilityTime <= time); }
 
     @Override
     public double getArrivalTime() { return arrivalTime; }

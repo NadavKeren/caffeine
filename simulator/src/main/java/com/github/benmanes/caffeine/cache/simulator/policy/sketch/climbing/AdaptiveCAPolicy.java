@@ -28,6 +28,13 @@ import com.typesafe.config.Config;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.LAHillClimber.AdaptationType;
 
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 import static com.google.common.base.Preconditions.checkState;
@@ -44,24 +51,27 @@ import static java.util.stream.Collectors.toSet;
 @Policy.PolicySpec(name = "sketch.ACA")
 public final class AdaptiveCAPolicy implements Policy {
 
+  static final boolean DEBUG = false;
+  static final boolean DUMP = true;
   private final double initialPercentMain;
   private final PolicyStats policyStats;
   private final LAHillClimber climber;
   private final LatencyEstimator<Long> latencyEstimator;
   private final Admittor admittor;
-  private final long cacheCapacity;
+  private final int cacheCapacity;
 
   private final CraBlock probationBlock;
   private final CraBlock protectedBlock;
   private final CraBlock windowBlock;
 
-  private long windowCapacity;
-  private long protectedCapacity;
+  private final List<Double> windowCapacityHistory;
+
+  private int windowCapacity;
+  private int protectedCapacity;
 
   private double windowSize;
   private double protectedSize;
 
-  static final boolean TRACE = false;
 
   private double normalizationBias;
   private double normalizationFactor;
@@ -74,13 +84,15 @@ public final class AdaptiveCAPolicy implements Policy {
           LAHillClimberType strategy, double percentMain, AdaptiveCASettings settings,
           double decayFactor, int maxLists) {
     this.latencyEstimator = createEstimator(settings.config());
-    this.cacheCapacity = settings.maximumSize();
+    this.cacheCapacity = (int) settings.maximumSize();
     int mainCacheCapacity = (int) (cacheCapacity * percentMain);
     this.protectedCapacity = (int) (mainCacheCapacity * settings.percentMainProtected());
     this.windowCapacity = cacheCapacity - mainCacheCapacity;
-    this.protectedBlock = new CraBlock(decayFactor, maxLists, this.protectedCapacity, latencyEstimator);
-    this.probationBlock = new CraBlock(decayFactor, maxLists, mainCacheCapacity - this.protectedCapacity, latencyEstimator);
-    this.windowBlock = new CraBlock(decayFactor, maxLists, this.windowCapacity, latencyEstimator);
+    this.protectedBlock = new CraBlock(decayFactor, maxLists, this.protectedCapacity, latencyEstimator, "protected-block");
+    this.probationBlock = new CraBlock(decayFactor, maxLists, mainCacheCapacity - this.protectedCapacity, latencyEstimator, "probation-block");
+    this.windowBlock = new CraBlock(decayFactor, maxLists, this.windowCapacity, latencyEstimator, "window-block");
+    this.windowCapacityHistory = new ArrayList<>();
+    this.windowCapacityHistory.add((double) 100 * this.windowCapacity / this.cacheCapacity);
     this.initialPercentMain = percentMain;
     this.policyStats = new PolicyStats("CAHillClimberWindow (%s)(k=%.2f,maxLists=%d)",
                                        strategy.name().toLowerCase(US), decayFactor, maxLists);
@@ -126,14 +138,12 @@ public final class AdaptiveCAPolicy implements Policy {
   public static Set<Policy> policies(Config config) {
     AdaptiveCASettings settings = new AdaptiveCASettings(config);
     Set<Policy> policies = new HashSet<>();
+    int decayFactor = settings.decayFactor();
+    int maxLists = settings.maxLists();
     for (LAHillClimberType climber : settings.strategy()) {
       for (double percentMain : settings.percentMain()) {
-        for (double k : settings.kValues()) {
-          for (int ml : settings.maxLists()) {
               policies
-                  .add(new AdaptiveCAPolicy(climber, percentMain, settings, k, ml));
-          }
-        }
+                  .add(new AdaptiveCAPolicy(climber, percentMain, settings, decayFactor, maxLists));
       }
     }
     return policies;
@@ -263,7 +273,7 @@ public final class AdaptiveCAPolicy implements Policy {
     protectedBlock.moveToTail(entry);
   }
 
-  private long size() { return windowBlock.size() + protectedBlock.size() + probationBlock.size(); }
+  private int size() { return windowBlock.size() + protectedBlock.size() + probationBlock.size(); }
 
   /**
    * Evicts from the admission window into the probation space. If the size exceeds the maximum,
@@ -307,6 +317,10 @@ public final class AdaptiveCAPolicy implements Policy {
     } else if (adaptation.type == AdaptationType.DECREASE_WINDOW) {
       decreaseWindow(adaptation.amount);
     }
+
+    if (adaptation.type != AdaptationType.HOLD) {
+      this.windowCapacityHistory.add((double) this.windowCapacity / this.cacheCapacity);
+    }
   }
 
   private void increaseWindow(double amount) {
@@ -331,7 +345,7 @@ public final class AdaptiveCAPolicy implements Policy {
     checkState(windowCapacity >= 0);
     checkState(protectedCapacity >= 0);
 
-    if (TRACE) {
+    if (DEBUG) {
       System.out.printf("+%,d (%,d -> %,d)%n", numOfItemsToMove, windowCapacity - numOfItemsToMove, windowCapacity);
     }
   }
@@ -343,7 +357,7 @@ public final class AdaptiveCAPolicy implements Policy {
     }
 
     double quota = Math.min(amount, windowSize);
-    int steps = (int) Math.min((int) windowSize - (int) (windowSize - quota), windowCapacity);
+    int steps = Math.min((int) windowSize - (int) (windowSize - quota), windowCapacity);
     windowSize -= quota;
 
     for (int i = 0; i < steps; i++) {
@@ -356,16 +370,45 @@ public final class AdaptiveCAPolicy implements Policy {
     checkState(windowCapacity >= 0);
     checkState(protectedCapacity >= 0);
 
-    if (TRACE) {
+    if (DEBUG) {
       System.out.printf("-%,d (%,d -> %,d)%n", steps, windowCapacity + steps, windowCapacity);
     }
   }
 
   private void printSegmentSizes() {
-    if (TRACE) {
+    if (DEBUG) {
       System.out.printf(
               "maxWindow=%d, maxProtected=%d, percentWindow=%.1f",
               windowCapacity, protectedCapacity, (100.0 * windowCapacity) / cacheCapacity);
+    }
+  }
+
+  private PrintWriter prepareFileWriter() {
+    LocalDateTime currentTime = LocalDateTime.now(ZoneId.systemDefault());
+    DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("dd-MM-HH-mm-ss");
+    PrintWriter writer = null;
+    try {
+      FileWriter fwriter = new FileWriter("/tmp/adaptive-CA-adaptions-" + currentTime.format(timeFormatter) + ".dump", StandardCharsets.UTF_8);
+      writer = new PrintWriter(fwriter);
+    } catch (IOException e) {
+      System.err.println("Error creating the log file handler");
+      e.printStackTrace();
+      System.exit(1);
+    }
+
+    return writer;
+  }
+
+  @Override
+  public void dump() {
+    if (DUMP) {
+      PrintWriter writer = prepareFileWriter();
+
+      for (double windowCapacity: windowCapacityHistory) {
+        writer.printf("%.2f,%.2f%n", windowCapacity, 100 - windowCapacity);
+      }
+
+      writer.close();
     }
   }
 
@@ -409,12 +452,12 @@ public final class AdaptiveCAPolicy implements Policy {
           .collect(toSet());
     }
 
-    public List<Integer> kValues() {
-      return config().getIntList("ca-hill-climber-window.cra.k");
+    public int decayFactor() {
+      return config().getInt("ca-hill-climber-window.cra.decay-factor");
     }
 
-    public List<Integer> maxLists() {
-      return config().getIntList("ca-hill-climber-window.cra.max-lists");
+    public int maxLists() {
+      return config().getInt("ca-hill-climber-window.cra.max-lists");
     }
 
   }

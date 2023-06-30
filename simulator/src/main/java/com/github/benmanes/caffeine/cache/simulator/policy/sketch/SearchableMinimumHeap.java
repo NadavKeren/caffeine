@@ -1,8 +1,10 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch;
 
+import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import it.unimi.dsi.fastutil.Pair;
 import it.unimi.dsi.fastutil.objects.ObjectObjectImmutablePair;
 
+import javax.annotation.Nullable;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -24,27 +26,94 @@ import static com.google.common.base.Preconditions.checkState;
 public class SearchableMinimumHeap<K, V> {
     final private static float DEFAULT_LOAD_FACTOR = 1.5f;
     protected K[] heap;
-    protected Map<K, Integer> idxMap;
     protected Map<K, V> valuesMap;
     protected int size;
     protected Comparator<? super K> c;
 
-    final private static boolean DEBUG = true;
+    final private static boolean DEBUG = false;
 
     public SearchableMinimumHeap(int capacity, Comparator<? super K> c) {
         this.c = c;
         this.heap = (K[]) new Object[capacity];
-        this.idxMap = new HashMap<>(capacity, DEFAULT_LOAD_FACTOR);
         this.valuesMap = new HashMap<>(capacity, DEFAULT_LOAD_FACTOR);
         this.size = 0;
+    }
+
+    public SearchableMinimumHeap(SearchableMinimumHeap<K,V> other) {
+        this. c = other.c;
+        int capacity = other.heap.length;
+        this.heap = (K[]) new Object[capacity];
+
+        this.valuesMap = new HashMap<>(capacity, DEFAULT_LOAD_FACTOR);
+        int numItemsToMove = Math.min(capacity, other.size);
+        for (int i = 0; i < numItemsToMove; ++i) {
+            K key = other.heap[i];
+            V value = other.get(key);
+
+            this.heap[i] = key;
+            this.valuesMap.put(key, value);
+        }
+
+        this.size = other.size;
+
+        makeHeap();
+    }
+
+    public void increaseSize(int amount, @Nullable List<Pair<K, V>> items) {
+        checkState(amount > 0, "Cannot increase by non-positive number");
+        Assert.assertCondition((items != null && amount >= items.size()),
+                               () -> String.format("Too many items offered: %d when increasing by: %d",
+                                                   items.size(),
+                                                   amount));
+        int newCapacity = heap.length + amount;
+
+        K[] newHeap = (K[]) new Object[newCapacity];
+        Map<K, V> newValuesMap = new HashMap<>(newCapacity, DEFAULT_LOAD_FACTOR);
+        int i = 0;
+        for (; i < size; ++i) {
+            K key = heap[i];
+            V value = get(key);
+
+            newHeap[i] = key;
+            newValuesMap.put(key, value);
+        }
+
+        for (Pair<K, V> itemPair : items) {
+            newHeap[i] = itemPair.first();
+            newValuesMap.put(itemPair.first(), itemPair.second());
+            ++i;
+        }
+
+        this.heap = newHeap;
+        this.valuesMap = newValuesMap;
+        this.size += items.size();
+
+        makeHeap();
+        final int idx = i; // for lambda capture
+        Assert.assertCondition((this.size == idx),
+                               () -> String.format("Size mismatch; expected = %d, actual = %d", size, idx));
+        checkState(this.valuesMap.size() == size, "Class and map sizes mismatch");
+    }
+
+    public List<Pair<K, V>> decreaseSize(int amount) {
+        checkState(amount > 0, "Cannot decrease by non-positive number");
+        int numOfItemsToRemove = Math.min(amount, size);
+
+        List<Pair<K, V>> itemsRemoved = new ArrayList<>(numOfItemsToRemove);
+
+        for (int i = 0; i < numOfItemsToRemove; ++i) {
+            Pair<K, V> item = extractMin();
+            itemsRemoved.add(item);
+        }
+
+        return itemsRemoved;
     }
 
     public void insert(K k, V v) {
         checkState(this.size <= this.heap.length, "Insertion into full heap");
 
         this.heap[this.size++] = k;
-        int heapIdx = upHeap(this.size - 1);
-        this.idxMap.put(k, heapIdx);
+        upHeap(this.size - 1);
         this.valuesMap.put(k, v);
     }
 
@@ -56,14 +125,12 @@ public class SearchableMinimumHeap<K, V> {
 
         K replacement = this.heap[--this.size];
         this.heap[0] = replacement;
-        this.idxMap.put(replacement, 0);
 
         this.heap[this.size] = null;
         if (this.size != 0) {
             downHeap(0);
         }
 
-        this.idxMap.remove(resultKey);
         this.valuesMap.remove(resultKey);
 
         return new ObjectObjectImmutablePair<>(resultKey, resultValue);
@@ -80,7 +147,7 @@ public class SearchableMinimumHeap<K, V> {
     }
 
     public boolean contains(K key) {
-        return this.idxMap.containsKey(key);
+        return this.valuesMap.containsKey(key);
     }
 
     public V get(K key) {
@@ -91,26 +158,13 @@ public class SearchableMinimumHeap<K, V> {
         return this.valuesMap.get(key);
     }
 
-    public int update(K key) {
-        Integer idx = this.idxMap.get(key);
-        checkState(idx != null, "Invalid update");
-
-        int res = downHeap(idx);
-
-        if (res == idx) {
-            res = upHeap(idx);
-        }
-
-        return res;
-    }
-
     public int size() {
         return this.size;
     }
 
     public void clear() {
         Arrays.fill(this.heap, 0, this.size, (Object)null);
-        this.idxMap.clear();
+        this.valuesMap.clear();
         this.size = 0;
     }
 
@@ -135,13 +189,11 @@ public class SearchableMinimumHeap<K, V> {
 
             if (!isWellPositioned) {
                 heap[i] = t;
-                idxMap.put(t, i);
                 i = leftChild;
             }
         }
 
         heap[i] = e;
-        idxMap.put(e, i);
         return i;
     }
 
@@ -160,13 +212,11 @@ public class SearchableMinimumHeap<K, V> {
 
             if (!isWellPositioned) {
                 heap[i] = t;
-                idxMap.put(t, i);
                 i = parent;
             }
         }
 
         heap[i] = e;
-        idxMap.put(e, i);
         return i;
     }
 

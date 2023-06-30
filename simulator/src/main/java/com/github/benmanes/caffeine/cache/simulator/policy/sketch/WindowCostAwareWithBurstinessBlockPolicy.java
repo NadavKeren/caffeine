@@ -1,12 +1,14 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
+import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
 import com.github.benmanes.caffeine.cache.simulator.admission.LATinyLfu;
 import com.github.benmanes.caffeine.cache.simulator.policy.*;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock;
 import com.typesafe.config.Config;
 
+import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Set;
 import java.util.function.DoubleSupplier;
@@ -17,23 +19,23 @@ import static java.util.stream.Collectors.toSet;
 
 @Policy.PolicySpec(name = "sketch.WindowCABurstBlock")
 public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
+    private static int ID = 0;
     private final WindowCAWithBBStats policyStats;
-    private final LatencyEstimator<Long> latencyEstimator;
-    private final LatencyEstimator<Long> burstEstimator;
-    private final Admittor admittor;
-    private final long cacheCapacity;
-    private final long nonBurstCacheCapacity;
+    protected final LatencyEstimator<Long> latencyEstimator;
+    protected final LatencyEstimator<Long> burstEstimator;
+    protected final Admittor admittor;
+    protected final int cacheCapacity;
 
-    private final CraBlock windowBlock;
-    private final CraBlock probationBlock;
-    private final CraBlock protectedBlock;
-    private final BurstBlock burstBlock;
+    protected final CraBlock windowBlock;
+    protected final CraBlock probationBlock;
+    protected final CraBlock protectedBlock;
+    protected final BurstBlock burstBlock;
 
-    private double normalizationBias;
-    private double normalizationFactor;
-    private double maxDelta;
-    private int maxDeltaCounts;
-    private int samplesCount;
+    protected double normalizationBias;
+    protected double normalizationFactor;
+    protected double maxDelta;
+    protected int maxDeltaCounts;
+    protected int samplesCount;
 
     private static final System.Logger logger = System.getLogger(LatencyEstimator.class.getName());
 
@@ -49,18 +51,26 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         this.burstEstimator = createBurstEstimator(settings);
         this.admittor = new LATinyLfu(settings.config(), policyStats, latencyEstimator);
 
-        this.cacheCapacity = settings.maximumSize();
+        this.cacheCapacity = (int) settings.maximumSize();
 
         final int burstCacheCapacity = (int) (settings.percentBurstBlock() * cacheCapacity);
-        this.nonBurstCacheCapacity = cacheCapacity - burstCacheCapacity;
+        int nonBurstCacheCapacity = cacheCapacity - burstCacheCapacity;
 
-        final long mainCacheSize = (long) (nonBurstCacheCapacity * percentMain);
-        final long protectedCapacity = (long) (mainCacheSize * settings.percentMainProtected());
-        final long windowCapacity = nonBurstCacheCapacity - mainCacheSize;
+        final int mainCacheSize = (int) (nonBurstCacheCapacity * percentMain);
+        final int protectedCapacity = (int) (mainCacheSize * settings.percentMainProtected());
+        final int windowCapacity = nonBurstCacheCapacity - mainCacheSize;
 
-        this.protectedBlock = new CraBlock(decayFactor, maxLists, protectedCapacity, latencyEstimator);
-        this.probationBlock = new CraBlock(decayFactor, maxLists, mainCacheSize - protectedCapacity, latencyEstimator);
-        this.windowBlock = new CraBlock(decayFactor, maxLists, windowCapacity, latencyEstimator);
+        this.protectedBlock = new CraBlock(decayFactor,
+                                           maxLists,
+                                           protectedCapacity,
+                                           latencyEstimator,
+                                           "protected-block");
+        this.probationBlock = new CraBlock(decayFactor,
+                                           maxLists,
+                                           mainCacheSize - protectedCapacity,
+                                           latencyEstimator,
+                                           "probation-block");
+        this.windowBlock = new CraBlock(decayFactor, maxLists, windowCapacity, latencyEstimator, "window-block");
         this.burstBlock = new BurstBlock(burstCacheCapacity, burstEstimator);
 
         this.normalizationBias = 0;
@@ -68,6 +78,93 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         this.maxDelta = 0;
         this.maxDeltaCounts = 0;
         this.samplesCount = 0;
+    }
+
+    public WindowCostAwareWithBurstinessBlockPolicy(int windowSize,
+                                                    int probationSize,
+                                                    int protectedSize,
+                                                    int burstSize,
+                                                    Config config,
+                                                    @Nullable WindowCAWithBBStats stats) {
+        WindowCAWithBBSettings settings = new WindowCAWithBBSettings(config);
+        int decayFactor = settings.decayFactor();
+        int maxLists = settings.maxLists();
+
+        this.policyStats = (stats == null)
+                           ? new WindowCAWithBBStats(
+                "sketch.WindowCAWithBB (W:%d,LFU:%d,B:%d,decayFactor=%d,maxLists=%d)",
+                windowSize,
+                probationSize + protectedSize,
+                burstSize,
+                decayFactor,
+                maxLists)
+                           : stats;
+
+        this.latencyEstimator = createLatencyEstimator(settings);
+        this.burstEstimator = createBurstEstimator(settings);
+        this.admittor = new LATinyLfu(settings.config(), policyStats, latencyEstimator);
+
+        this.cacheCapacity = (int) settings.maximumSize();
+
+        this.protectedBlock = new CraBlock(decayFactor, maxLists, protectedSize, latencyEstimator, "protected-block");
+        this.probationBlock = new CraBlock(decayFactor, maxLists, probationSize, latencyEstimator, "probation-block");
+        this.windowBlock = new CraBlock(decayFactor, maxLists, windowSize, latencyEstimator, "window-block");
+        this.burstBlock = new BurstBlock(burstSize, burstEstimator);
+
+        this.normalizationBias = 0;
+        this.normalizationFactor = 0;
+        this.maxDelta = 0;
+        this.maxDeltaCounts = 0;
+        this.samplesCount = 0;
+    }
+
+    public WindowCostAwareWithBurstinessBlockPolicy(WindowCAWithBBStats stats,
+                                                    int windowSize,
+                                                    int probationSize,
+                                                    int protectedSize,
+                                                    int burstSize,
+                                                    LatencyEstimator<Long> latencyEstimator,
+                                                    LatencyEstimator<Long> burstEstimator,
+                                                    Admittor admittor,
+                                                    CraBlock otherWindow,
+                                                    CraBlock otherProtected,
+                                                    CraBlock otherProbation,
+                                                    BurstBlock otherBurst,
+                                                    String name) {
+        this.policyStats = stats;
+        this.latencyEstimator = latencyEstimator;
+        this.burstEstimator = burstEstimator;
+        this.admittor = admittor;
+
+        this.cacheCapacity = windowSize + probationSize + protectedSize + burstSize;
+
+        this.protectedBlock = otherProtected.createGhostCopy(name + "-protected@" + ID);
+        this.probationBlock = otherProbation.createGhostCopy(name + "-probation@" + ID);
+        this.windowBlock = otherWindow.createGhostCopy(name + "-window@" + ID);
+        this.burstBlock = new BurstBlock(otherBurst, name + "-burst@" + ID);
+
+        ++ID;
+
+        this.normalizationBias = 0;
+        this.normalizationFactor = 0;
+        this.maxDelta = 0;
+        this.maxDeltaCounts = 0;
+        this.samplesCount = 0;
+    }
+
+    /***
+     * Creates a dummy cache.
+     */
+    public WindowCostAwareWithBurstinessBlockPolicy() {
+        this.policyStats = null;
+        this.latencyEstimator = null;
+        this.burstEstimator = null;
+        this.admittor = null;
+        this.cacheCapacity = 40;
+        this.protectedBlock = null;
+        this.probationBlock = null;
+        this.windowBlock = null;
+        this.burstBlock = null;
     }
 
     private LatencyEstimator<Long> createLatencyEstimator(WindowCAWithBBSettings settings) {
@@ -92,7 +189,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         logger.log(System.Logger.Level.DEBUG,
                    String.format("Created estimator of type %s, class: %s",
                                  estimationType,
-                                 estimator.getClass().getName()));
+                                 estimator.getClass().getSimpleName()));
 
         return estimator;
     }
@@ -125,12 +222,11 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
     public static Set<Policy> policies(Config config) {
         WindowCAWithBBSettings settings = new WindowCAWithBBSettings(config);
         return settings.percentMain().stream()
-                       .flatMap(percentMain ->
-                                        settings.decayFactors().stream()
-                                                .map(k -> settings.maxLists().stream()
-                                                                  .map(ml -> new WindowCostAwareWithBurstinessBlockPolicy(percentMain, settings, k,ml)
-                                                                  )))
-                       .flatMap(x -> x)
+                       .map(percentMain ->
+                                    new WindowCostAwareWithBurstinessBlockPolicy(percentMain,
+                                                                                 settings,
+                                                                                 settings.decayFactor(),
+                                                                                 settings.maxLists()))
                        .collect(toSet());
     }
 
@@ -191,7 +287,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                             ? Math.min(normalizationBias, Math.max(0, delta))
                             : Math.max(0, delta);
 
-        if (samplesCount % 1000 == 0 || normalizationFactor == 0){
+        if (samplesCount % 1000 == 0 || normalizationFactor == 0) {
             normalizationFactor = maxDelta;
             maxDeltaCounts = 1;
             samplesCount = 0;
@@ -201,6 +297,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         probationBlock.setNormalization(normalizationBias, normalizationFactor);
         windowBlock.setNormalization(normalizationBias, normalizationFactor);
     }
+
     /**
      * Evicts from the admission window into the probation space. If the size exceeds the maximum,
      * then the admission candidate and probation's victim are evaluated and one is evicted.
@@ -212,7 +309,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
 
         EntryData windowBlockVictim = windowBlock.removeVictim();
         probationBlock.addEntry(windowBlockVictim);
-        if (windowCASize() > nonBurstCacheCapacity) {
+        if (lfuSize() > lfuCapacity()) {
             EntryData probationBlockVictim = probationBlock.findVictim();
             EntryData evict = admittor.admit(windowBlockVictim.event(), probationBlockVictim.event())
                               ? probationBlockVictim
@@ -220,32 +317,43 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
 
             probationBlock.remove(evict.key());
 
-            final double evictScore =  burstEstimator.getLatencyEstimation(evict.key(), eventTime);
-            if (burstBlock.isFull()) {
-                final EntryData burstVictim = burstBlock.getVictim();
-                final double burstVictimScore = burstEstimator.getLatencyEstimation(burstVictim.key(), eventTime);
+            if (burstBlock.capacity() > 0) {
+                final double evictScore = burstEstimator.getLatencyEstimation(evict.key(), eventTime);
+                if (burstBlock.isFull()) {
+                    final EntryData burstVictim = burstBlock.getVictim();
+                    final double burstVictimScore = burstEstimator.getLatencyEstimation(burstVictim.key(), eventTime);
 
-                if (evictScore >= burstVictimScore) {
-                    burstBlock.evict();
+                    if (evictScore >= burstVictimScore) {
+                        burstBlock.evict();
+                        burstBlock.admit(evict);
+                        policyStats.recordEviction();
+                    }
+                } else {
                     burstBlock.admit(evict);
-                    policyStats.recordEviction();
                 }
             } else {
-                burstBlock.admit(evict);
+                policyStats.recordEviction();
             }
         }
     }
 
-    private long windowCASize() {
-        return windowBlock.size() + protectedBlock.size() + probationBlock.size();
+    private int lfuSize() {
+        return protectedBlock.size() + probationBlock.size();
+    }
+
+    private int lfuCapacity() {
+        return protectedBlock.capacity() + probationBlock.capacity();
     }
 
     @Override
     public void record(AccessEvent event) {
+        final double hitPenaltyBefore = stats().hitPenalty();
+        final double delayedHitPenaltyBefore = stats().delayedHitPenalty();
+        final double missPenaltyBefore = stats().missPenalty();
+
         final long key = event.key();
         policyStats.recordOperation();
         EntryData entry = null;
-//        boolean isBurstBlockHit = false;
 
         if (windowBlock.isHit(key)) {
             entry = windowBlock.get(key);
@@ -259,14 +367,14 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             entry = protectedBlock.get(key);
             policyStats.recordProtectedHit(event.missPenalty());
             onProtectedHit(entry);
-        } else if (burstBlock.isHit(key)){
+        } else if (burstBlock.isHit(key)) {
             entry = burstBlock.get(key);
             policyStats.recordBurstBlockHit(event.missPenalty());
         } else {
             onMiss(event);
             latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
             burstEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
-            policyStats.recordMiss();
+            policyStats.recordMiss(event.missPenalty());
             policyStats.recordMissPenalty(event.missPenalty());
             updateNormalization(key);
         }
@@ -275,6 +383,27 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             admittor.record(event.key());
             recordAccordingToAvailability(entry, event);
         }
+
+        final double hitPenaltyAfter = stats().hitPenalty();
+        final double delayedHitPenaltyAfter = stats().delayedHitPenalty();
+        final double missPenaltyAfter = stats().missPenalty();
+
+        Assert.assertCondition((hitPenaltyAfter > hitPenaltyBefore
+                                && delayedHitPenaltyAfter == delayedHitPenaltyBefore
+                                && missPenaltyAfter == missPenaltyBefore)
+                               || (hitPenaltyAfter == hitPenaltyBefore
+                                   && delayedHitPenaltyAfter > delayedHitPenaltyBefore
+                                   && missPenaltyAfter == missPenaltyBefore)
+                               || (hitPenaltyAfter == hitPenaltyBefore
+                                   && delayedHitPenaltyAfter == delayedHitPenaltyBefore
+                                   && missPenaltyAfter > missPenaltyBefore),
+                               () -> String.format("No stats update: Before: %.2f %.2f %.2f After: %.2f %.2f %.2f",
+                                                   hitPenaltyBefore,
+                                                   delayedHitPenaltyBefore,
+                                                   missPenaltyBefore,
+                                                   hitPenaltyAfter,
+                                                   delayedHitPenaltyAfter,
+                                                   missPenaltyAfter));
     }
 
     private void recordAccordingToAvailability(EntryData entry, AccessEvent currEvent) {
@@ -292,25 +421,31 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());
             policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
             policyStats.recordDelayedHit();
-            latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
+            latencyEstimator.addValueToRecord(currEvent.key(),
+                                              currEvent.delayedHitPenalty(),
+                                              currEvent.getArrivalTime());
             burstEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
         }
     }
 
     @Override
-    public void dump() { burstBlock.dump(); }
-
+    public void dump() {burstBlock.dump();}
 
 
     @Override
     public void finished() {
-        checkState(windowCASize() <= cacheCapacity);
+        checkState(windowBlock.size() + probationBlock.size() + protectedBlock.size() + burstBlock.size()
+                   <= cacheCapacity);
+        checkState(windowBlock.capacity()
+                   + probationBlock.capacity()
+                   + protectedBlock.capacity()
+                   + burstBlock.capacity() == cacheCapacity);
     }
 
     @Override
-    public boolean isPenaltyAware() { return true; }
+    public boolean isPenaltyAware() {return true;}
 
-    private static final class WindowCAWithBBSettings extends BasicSettings {
+    protected static final class WindowCAWithBBSettings extends BasicSettings {
 
         public WindowCAWithBBSettings(Config config) {
             super(config);
@@ -324,21 +459,22 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             return config().getDouble("ca-bb-window.percent-main-protected");
         }
 
-        public double percentBurstBlock() { return config().getDouble("ca-bb-window.percent-burst-block"); }
+        public double percentBurstBlock() {return config().getDouble("ca-bb-window.percent-burst-block");}
 
-        public String burstEstimationStrategy() { return config().getString("ca-bb-window.burst-strategy"); }
+        public String burstEstimationStrategy() {return config().getString("ca-bb-window.burst-strategy");}
 
-        public int agingWindowSize() { return config().getInt("ca-bb-window.aging-window-size"); }
-        public double ageSmoothFactor() { return config().getDouble("ca-bb-window.age-smoothing"); }
+        public int agingWindowSize() {return config().getInt("ca-bb-window.aging-window-size");}
 
-        public int numOfPartitions() { return config().getInt("ca-bb-window.number-of-partitions"); }
+        public double ageSmoothFactor() {return config().getDouble("ca-bb-window.age-smoothing");}
 
-        public List<Integer> decayFactors() {
-            return config().getIntList("ca-bb-window.cra.decayFactors");
+        public int numOfPartitions() {return config().getInt("ca-bb-window.number-of-partitions");}
+
+        public int decayFactor() {
+            return config().getInt("ca-bb-window.cra.decayFactors");
         }
 
-        public List<Integer> maxLists() {
-            return config().getIntList("ca-bb-window.cra.max-lists");
+        public int maxLists() {
+            return config().getInt("ca-bb-window.cra.max-lists");
         }
     }
 
@@ -350,6 +486,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         private double windowBenefit = 0;
         private double protectedBenefit = 0;
         private double probationBenefit = 0;
+        private double missCosts = 0;
         private double burstBenefit = 0;
         private double totalBenefit = 0;
 
@@ -363,39 +500,55 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             addMetric(Metric.of("Protected Benefit", (DoubleSupplier) this::protectedBenefit, PERCENT, true));
             addMetric(Metric.of("Probation Benefit", (DoubleSupplier) this::probationBenefit, PERCENT, true));
             addMetric(Metric.of("Burst Benefit", (DoubleSupplier) this::burstBenefit, PERCENT, true));
+            addMetric(Metric.of("Miss Cost", (DoubleSupplier) this::missCost, PERCENT, true));
         }
 
         final public void recordWindowHit(double missPenalty) {
             ++this.windowHitCount;
             this.windowBenefit += missPenalty;
-            this.totalBenefit +=missPenalty;
+            this.totalBenefit += missPenalty;
         }
 
         final public void recordProtectedHit(double missPenalty) {
             ++this.protectedHitCount;
             this.protectedBenefit += missPenalty;
-            this.totalBenefit +=missPenalty;
+            this.totalBenefit += missPenalty;
         }
 
         final public void recordProbationHit(double missPenalty) {
             ++this.probationHitCount;
             this.probationBenefit += missPenalty;
-            this.totalBenefit +=missPenalty;
+            this.totalBenefit += missPenalty;
         }
 
         final public void recordBurstBlockHit(double missPenalty) {
             ++this.burstBlockHitCount;
             this.burstBenefit += missPenalty;
-            this.totalBenefit +=missPenalty;
+            this.totalBenefit += missPenalty;
         }
 
-        final protected double windowRate() { return (double) windowHitCount / requestCount(); }
-        final protected double protectedRate() { return (double) protectedHitCount / requestCount(); }
-        final protected double probationRate() { return (double) probationHitCount / requestCount(); }
-        final protected double burstBlockRate() { return (double) burstBlockHitCount / requestCount(); }
-        final public double windowBenefit() { return windowBenefit / totalBenefit; }
-        final public double protectedBenefit() { return protectedBenefit / totalBenefit; }
-        final public double probationBenefit() { return probationBenefit / totalBenefit; }
-        final public double burstBenefit() { return burstBenefit / totalBenefit; }
+        final public void recordMiss(double missPenalty) {
+            super.recordMiss();
+            this.missCosts += missPenalty;
+            this.totalBenefit += missPenalty;
+        }
+
+        final protected double windowRate() {return (double) windowHitCount / requestCount();}
+
+        final protected double protectedRate() {return (double) protectedHitCount / requestCount();}
+
+        final protected double probationRate() {return (double) probationHitCount / requestCount();}
+
+        final protected double burstBlockRate() {return (double) burstBlockHitCount / requestCount();}
+
+        final public double windowBenefit() {return windowBenefit / totalBenefit;}
+
+        final public double protectedBenefit() {return protectedBenefit / totalBenefit;}
+
+        final public double probationBenefit() {return probationBenefit / totalBenefit;}
+
+        final public double burstBenefit() {return burstBenefit / totalBenefit;}
+
+        final public double missCost() {return missCosts / totalBenefit;}
     }
 }
