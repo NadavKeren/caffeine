@@ -16,3 +16,5 @@ target
 **/replay_pid*.log
 **/caffeine.log
 simulator/src/main/resources/application.conf
+*.log
+*.log.lck
