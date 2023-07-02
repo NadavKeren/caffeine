@@ -1,6 +1,7 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
+import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.ConsoleColors;
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
@@ -22,8 +23,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-
-import static com.google.common.base.Preconditions.checkState;
 
 @Policy.PolicySpec(name = "sketch.AdaptiveCAWithBB")
 public class AdaptiveCAWithBurstBlockPolicy implements Policy {
@@ -55,10 +54,16 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
             currCapacityState = new CacheCapacityState(windowQuota, probationQuota + protectedQuota, burstQuota);
 
-            checkState(windowQuota >= 0 && probationQuota >= 0 && protectedQuota >= 0 && burstQuota >= 0,
-                       "Quotas must be non-negative");
-            checkState(windowQuota + probationQuota + protectedQuota + burstQuota == quantaCount,
-                       "Invalid settings - sum of quota mismatch");
+            Assert.assertCondition(windowQuota >= 0 && probationQuota >= 0 && protectedQuota >= 0 && burstQuota >= 0,
+                                   () -> String.format("Quotas must be non-negative : Window: %d, Probation: %d, Protected: %d, Burst: %d",
+                                                       windowQuota,
+                                                       probationQuota,
+                                                       protectedQuota,
+                                                       burstQuota));
+            Assert.assertCondition(windowQuota + probationQuota + protectedQuota + burstQuota == quantaCount,
+                                   () -> String.format("Invalid settings - sum of quota mismatch %d vs %d",
+                                                       windowQuota + probationQuota + protectedQuota + burstQuota,
+                                                       quantaCount));
 
             int quantumSize = (int) (settings.maximumSize() / quantaCount);
             this.adaptionTimeframe = (int) (settings.adaptionMultiplier() * settings.maximumSize());

@@ -14,7 +14,6 @@ import java.util.Set;
 import java.util.function.DoubleSupplier;
 
 import static com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats.Metric.MetricType.PERCENT;
-import static com.google.common.base.Preconditions.checkState;
 import static java.util.stream.Collectors.toSet;
 
 @Policy.PolicySpec(name = "sketch.WindowCABurstBlock")
@@ -434,12 +433,31 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
 
     @Override
     public void finished() {
-        checkState(windowBlock.size() + probationBlock.size() + protectedBlock.size() + burstBlock.size()
-                   <= cacheCapacity);
-        checkState(windowBlock.capacity()
-                   + probationBlock.capacity()
-                   + protectedBlock.capacity()
-                   + burstBlock.capacity() == cacheCapacity);
+        final int windowSize = windowBlock.size();
+        final int probationSize = probationBlock.size();
+        final int protectedSize = protectedBlock.size();
+        final int burstSize = burstBlock.size();
+        final int totalSize = windowSize + probationSize + protectedSize + burstSize;
+
+        Assert.assertCondition(totalSize <= cacheCapacity,
+                               () -> String.format("size overflow: capacity: %d, window: %d probation: %d protected: %d burst: %d",
+                                                   cacheCapacity,
+                                                   windowSize,
+                                                   probationSize,
+                                                   protectedSize,
+                                                   burstSize));
+
+        final int windowCapacity = windowBlock.capacity();
+        final int probationCapacity = probationBlock.capacity();
+        final int protectedCapacity = protectedBlock.capacity();
+        final int burstCapacity = burstBlock.capacity();
+        Assert.assertCondition(windowCapacity + probationCapacity + protectedCapacity + burstCapacity == cacheCapacity,
+                               () -> String.format("capacity mismatch, Expected: %d\tGot: window: %d, probation: %d, protected: %d, burst: %d",
+                                                   cacheCapacity,
+                                                   windowCapacity,
+                                                   probationCapacity,
+                                                   protectedCapacity,
+                                                   burstCapacity));
     }
 
     @Override

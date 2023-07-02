@@ -14,8 +14,6 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
-import static com.google.common.base.Preconditions.checkState;
-
 /***
  * A combination of an heap and an hash table that allows min() and get() in constant time,
  * and allows an update of the position of an item within the heap in logarithmic time.
@@ -60,7 +58,7 @@ public class SearchableMinimumHeap<K, V> {
     }
 
     public void increaseSize(int amount, @Nullable List<Pair<K, V>> items) {
-        checkState(amount > 0, "Cannot increase by non-positive number");
+        Assert.assertCondition(amount > 0, "Cannot increase by non-positive number " + amount);
         Assert.assertCondition((items != null && amount >= items.size()),
                                () -> String.format("Too many items offered: %d when increasing by: %d",
                                                    items.size(),
@@ -92,11 +90,11 @@ public class SearchableMinimumHeap<K, V> {
         final int idx = i; // for lambda capture
         Assert.assertCondition((this.size == idx),
                                () -> String.format("Size mismatch; expected = %d, actual = %d", size, idx));
-        checkState(this.valuesMap.size() == size, "Class and map sizes mismatch");
+        Assert.assertCondition(this.valuesMap.size() == size, () -> String.format("Class and map sizes mismatch; Class size: %d, Map size: %d", size, this.valuesMap.size()));
     }
 
     public List<Pair<K, V>> decreaseSize(int amount) {
-        checkState(amount > 0, "Cannot decrease by non-positive number");
+        Assert.assertCondition(amount > 0, "Cannot decrease by non-positive number " + amount);
         int numOfItemsToRemove = Math.min(amount, size);
 
         List<Pair<K, V>> itemsRemoved = new ArrayList<>(numOfItemsToRemove);
@@ -110,7 +108,7 @@ public class SearchableMinimumHeap<K, V> {
     }
 
     public void insert(K k, V v) {
-        checkState(this.size <= this.heap.length, "Insertion into full heap");
+        Assert.assertCondition(this.size <= this.heap.length, "Insertion into full heap");
 
         this.heap[this.size++] = k;
         upHeap(this.size - 1);
@@ -118,7 +116,7 @@ public class SearchableMinimumHeap<K, V> {
     }
 
     public Pair<K, V> extractMin() {
-        checkState(this.size > 0, "Cannot extract from empty heap");
+        Assert.assertCondition(this.size > 0, "Cannot extract from empty heap");
 
         K resultKey = this.heap[0];
         V resultValue = this.valuesMap.get(resultKey);
@@ -198,7 +196,8 @@ public class SearchableMinimumHeap<K, V> {
     }
 
     public int upHeap(int i) {
-        checkState(i < size);
+        final int originIdx = i;
+        Assert.assertCondition(i < size, () -> String.format("Invalid index: %d in size %d", originIdx, size));
 
         K e = heap[i];
         int parent;

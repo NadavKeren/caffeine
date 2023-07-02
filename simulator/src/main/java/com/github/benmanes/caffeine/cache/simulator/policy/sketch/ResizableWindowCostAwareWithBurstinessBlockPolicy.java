@@ -16,8 +16,6 @@ import java.util.List;
 
 import java.lang.System.Logger;
 
-import static com.google.common.base.Preconditions.checkState;
-
 public class ResizableWindowCostAwareWithBurstinessBlockPolicy extends WindowCostAwareWithBurstinessBlockPolicy {
     final private static boolean DEBUG = true;
     final private static Logger logger = System.getLogger(ResizableWindowCostAwareWithBurstinessBlockPolicy.class.getSimpleName());
@@ -97,7 +95,7 @@ public class ResizableWindowCostAwareWithBurstinessBlockPolicy extends WindowCos
                                                 decrease.toString()));
         }
 
-        checkState(increase != decrease, "Should not increment and decrement in the same block");
+        Assert.assertCondition(increase != decrease, "Should not perform increment and decrement in the same block");
 
         List<EntryData> items;
         switch (decrease) {
@@ -158,7 +156,16 @@ public class ResizableWindowCostAwareWithBurstinessBlockPolicy extends WindowCos
     }
 
     public void validateSize() {
-        checkState(windowBlock.size() + probationBlock.size() + protectedBlock.size() + burstBlock.size() <= totalCapacity(), "size overflow");
+        final int windowSize = windowBlock.size();
+        final int probationSize = probationBlock.size();
+        final int protectedSize = protectedBlock.size();
+        final int burstSize = burstBlock.size();
+        final int capacity = totalCapacity();
+        Assert.assertCondition(windowSize + probationSize + protectedSize + burstSize <= capacity,
+                               () -> String.format("size overflow: Capacity: %d\tWindow: %d, Probation: %d, Protected: %d, Burst: %d",
+                                                   capacity, windowSize, probationSize, protectedSize, burstSize));
+
+
     }
 
     public void resetTimeframeStats() {
