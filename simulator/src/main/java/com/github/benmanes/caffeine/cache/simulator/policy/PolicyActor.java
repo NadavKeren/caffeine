@@ -89,6 +89,7 @@ public final class PolicyActor extends AbstractBehavior<PolicyActor.Command> {
       policy.finished();
       simulator.tell(new Stats(policy.stats()));
     } catch (RuntimeException e) {
+      System.err.println("Error on event: " + eventNumber);
       e.printStackTrace();
       System.exit(1);
     }
