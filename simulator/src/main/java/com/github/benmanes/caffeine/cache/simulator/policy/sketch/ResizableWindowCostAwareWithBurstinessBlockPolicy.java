@@ -103,7 +103,17 @@ public class ResizableWindowCostAwareWithBurstinessBlockPolicy extends WindowCos
                 items = this.windowBlock.decreaseSize(quantumSize);
                 break;
             case LFU:
-                items = this.protectedBlock.decreaseSize(quantumSize);
+                final List<EntryData> protectedItems = this.protectedBlock.decreaseSize(quantumSize);
+                for (EntryData item : protectedItems) {
+                    this.probationBlock.addEntry(item);
+                }
+
+                items = new ArrayList<>(quantumSize);
+                final int probationSize = this.probationBlock.size();
+                for (int i = 0; i < Math.min(quantumSize, probationSize); ++i) {
+                    EntryData victim = this.probationBlock.removeVictim();
+                    items.add(victim);
+                }
                 break;
             case BC:
                 items = this.burstBlock.decreaseSize(quantumSize);
@@ -152,7 +162,10 @@ public class ResizableWindowCostAwareWithBurstinessBlockPolicy extends WindowCos
 
     public void validateCapacity() {
         Assert.assertCondition((totalCapacity() == cacheCapacity),
-                               () ->  String.format("The sum of capacities != cache capacity: %s vs %s", totalCapacity(), cacheCapacity));
+                               () ->  String.format("%s: The sum of capacities != cache capacity: %s vs %s",
+                                                    name,
+                                                    totalCapacity(),
+                                                    cacheCapacity));
     }
 
     public void validateSize() {
@@ -162,8 +175,8 @@ public class ResizableWindowCostAwareWithBurstinessBlockPolicy extends WindowCos
         final int burstSize = burstBlock.size();
         final int capacity = totalCapacity();
         Assert.assertCondition(windowSize + probationSize + protectedSize + burstSize <= capacity,
-                               () -> String.format("size overflow: Capacity: %d\tWindow: %d, Probation: %d, Protected: %d, Burst: %d",
-                                                   capacity, windowSize, probationSize, protectedSize, burstSize));
+                               () -> String.format("%s: size overflow: Capacity: %d\tWindow: %d, Probation: %d, Protected: %d, Burst: %d",
+                                                   name, capacity, windowSize, probationSize, protectedSize, burstSize));
 
 
     }
