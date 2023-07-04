@@ -29,6 +29,7 @@ import java.util.stream.Stream;
  * @author himelbrand@gmail.com (Omri Himelbrand)
  */
 public final class LatencyTraceReader extends TextTraceReader {
+  private final static BigInteger MAX_LONG = new BigInteger(Long.toString(Long.MAX_VALUE));
 
   public LatencyTraceReader(String filePath) {
     super(filePath);
@@ -40,12 +41,8 @@ public final class LatencyTraceReader extends TextTraceReader {
   }
 
   private long parseKey(String uuid) {
-    try {
-      return Long.parseLong(uuid);
-    } catch (RuntimeException e) {
-      BigInteger num = new BigInteger(uuid);
-      return num.shiftRight(64).longValue() ^ num.longValue();
-    }
+    BigInteger num = new BigInteger(uuid);
+    return num.compareTo(MAX_LONG) <= 0 ? num.longValue() :  num.mod(MAX_LONG).longValue();
   }
 
   @Override
