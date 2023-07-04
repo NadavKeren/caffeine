@@ -166,7 +166,7 @@ public final class CraBlock {
             this.addEntry(entry);
         }
 
-//        validateBlock();
+        validateBlock();
 
         if (DEBUG) {
             logger.log(Logger.Level.INFO,
@@ -232,9 +232,6 @@ public final class CraBlock {
 
     public void remove(long key) {
         Node node = data.get(key);
-        if (node == null) {
-            System.out.println("here");
-        }
         node.remove();
         data.remove(key);
         --size;
@@ -340,22 +337,6 @@ public final class CraBlock {
                                  name,
                                  size,
                                  data.size()));
-
-//        int numOfItems = 0;
-//
-//        for (int i = 0; i < maxLists; ++i) {
-//            Node curr = lists[i].sentinel.next;
-//            while (curr != lists[i].sentinel) {
-//                ++numOfItems;
-//                curr = curr.next;
-//            }
-//        }
-//
-//        checkState(size == numOfItems,
-//                   String.format("%s: number of items mismatch: size: %d\tnumber of items in lists: %d",
-//                                 name,
-//                                 size,
-//                                 numOfItems));
     }
 
     /**

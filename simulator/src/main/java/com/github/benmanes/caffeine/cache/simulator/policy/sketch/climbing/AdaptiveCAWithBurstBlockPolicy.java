@@ -97,6 +97,8 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                                    burstQuota,
                                    quantumSize));
             }
+
+            finished();
         } catch (RuntimeException e) {
             e.printStackTrace();
             System.exit(1);
@@ -162,9 +164,9 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
     @Override
     public void record(AccessEvent event) {
-//        final double hitPenaltyBefore = stats().hitPenalty();
-//        final double delayedHitPenaltyBefore = stats().delayedHitPenalty();
-//        final double missPenaltyBefore = stats().missPenalty();
+        final double hitPenaltyBefore = stats().hitPenalty();
+        final double delayedHitPenaltyBefore = stats().delayedHitPenalty();
+        final double missPenaltyBefore = stats().missPenalty();
         this.mainCache.record(event);
         for (int i = 0; i < NUM_OF_POSSIBLE_CACHES; ++i) {
             this.ghostCaches[i].record(event);
@@ -177,14 +179,22 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
             adapt();
         }
 
-//        final double hitPenaltyAfter = stats().hitPenalty();
-//        final double delayedHitPenaltyAfter = stats().delayedHitPenalty();
-//        final double missPenaltyAfter = stats().missPenalty();
-//
-//        checkState((hitPenaltyAfter > hitPenaltyBefore && delayedHitPenaltyAfter == delayedHitPenaltyBefore && missPenaltyAfter == missPenaltyBefore)
-//                   || (hitPenaltyAfter == hitPenaltyBefore && delayedHitPenaltyAfter > delayedHitPenaltyBefore && missPenaltyAfter == missPenaltyBefore)
-//                   || (hitPenaltyAfter == hitPenaltyBefore && delayedHitPenaltyAfter == delayedHitPenaltyBefore && missPenaltyAfter > missPenaltyBefore),
-//                   String.format("No stats update: Before: %.2f %.2f %.2f After: %.2f %.2f %.2f", hitPenaltyBefore, delayedHitPenaltyBefore, missPenaltyBefore, hitPenaltyAfter, delayedHitPenaltyAfter, missPenaltyAfter));
+        final double hitPenaltyAfter = stats().hitPenalty();
+        final double delayedHitPenaltyAfter = stats().delayedHitPenalty();
+        final double missPenaltyAfter = stats().missPenalty();
+
+        Assert.assertCondition((hitPenaltyAfter > hitPenaltyBefore && delayedHitPenaltyAfter == delayedHitPenaltyBefore && missPenaltyAfter == missPenaltyBefore)
+                               || (hitPenaltyAfter == hitPenaltyBefore && delayedHitPenaltyAfter > delayedHitPenaltyBefore && missPenaltyAfter == missPenaltyBefore)
+                               || (hitPenaltyAfter == hitPenaltyBefore && delayedHitPenaltyAfter == delayedHitPenaltyBefore && missPenaltyAfter > missPenaltyBefore),
+                               () -> String.format("No stats update: Before: %.2f %.2f %.2f After: %.2f %.2f %.2f",
+                                                   hitPenaltyBefore,
+                                                   delayedHitPenaltyBefore,
+                                                   missPenaltyBefore,
+                                                   hitPenaltyAfter,
+                                                   delayedHitPenaltyAfter,
+                                                   missPenaltyAfter));
+
+        finished();
     }
 
     private void adapt() {
