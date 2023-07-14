@@ -61,9 +61,6 @@ public final class PolicyActor extends AbstractBehavior<PolicyActor.Command> {
   private Behavior<Command> process(List<AccessEvent> events) {
     policy.stats().stopwatch().start();
     for (AccessEvent event : events) {
-      long priorMisses = policy.stats().missCount();
-      long priorHits = policy.stats().hitCount();
-
       try {
         policy.record(event);
         ++eventNumber;
@@ -71,12 +68,6 @@ public final class PolicyActor extends AbstractBehavior<PolicyActor.Command> {
         System.err.println("Error on event: " + eventNumber);
         e.printStackTrace();
         System.exit(1);
-      }
-
-      if (policy.stats().hitCount() > priorHits) {
-        policy.stats().recordHitPenalty(event.hitPenalty());
-      } else if (policy.stats().missCount() > priorMisses) {
-        policy.stats().recordMissPenalty(event.missPenalty());
       }
     }
     policy.stats().stopwatch().stop();
