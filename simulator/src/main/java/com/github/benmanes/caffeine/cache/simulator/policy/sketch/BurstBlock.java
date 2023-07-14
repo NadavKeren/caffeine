@@ -1,16 +1,17 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch;
 
+import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.ConsoleColors;
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import it.unimi.dsi.fastutil.Pair;
 import it.unimi.dsi.fastutil.objects.ObjectObjectImmutablePair;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.lang.System.Logger;
-
-import static com.google.common.base.Preconditions.checkState;
 
 final public class BurstBlock {
     final private static boolean DEBUG = true;
@@ -18,9 +19,11 @@ final public class BurstBlock {
     private SearchableMinimumHeap<Long, EntryData> heap;
     private int maximumSize;
     private int fetchCounter;
+    final private Comparator<Long> c;
 
     public BurstBlock(int maximumSize, LatencyEstimator<Long> estimator) {
-        this.heap = new SearchableMinimumHeap<>(maximumSize, (l1, l2) -> (int)(estimator.getLatencyEstimation(l1) - estimator.getLatencyEstimation(l2)));
+        this.c = (l1, l2) -> (int)(estimator.getLatencyEstimation(l1) - estimator.getLatencyEstimation(l2));
+        this.heap = new SearchableMinimumHeap<>(maximumSize, this.c);
         this.maximumSize = maximumSize;
         this.fetchCounter = 0;
     }
@@ -29,10 +32,13 @@ final public class BurstBlock {
         this.heap = new SearchableMinimumHeap<>(other.heap);
         this.maximumSize = other.maximumSize;
         this.fetchCounter = 0;
+        this.c = other.c;
     }
 
-    public void evict() {
-        heap.extractMin();
+    public EntryData removeVictim() {
+        var res = heap.extractMin();
+
+        return res.second();
     }
 
     public void admit(EntryData entry) {
@@ -61,7 +67,7 @@ final public class BurstBlock {
     }
 
     public List<EntryData> decreaseSize(int amount) {
-        checkState(amount <= maximumSize, "Cannot lower the size below 0");
+        Assert.assertCondition(amount <= maximumSize, "Cannot lower the size below 0");
         var items = this.heap.decreaseSize(amount);
         maximumSize -= amount;
 
@@ -77,14 +83,22 @@ final public class BurstBlock {
         return evicted;
     }
 
+    public EntryData remove(long key) {
+        return this.heap.remove(key);
+    }
+
     private void update() {
         heap.makeHeap();
         fetchCounter = 0;
     }
 
-    public EntryData get(long key) {
+    public @Nullable EntryData get(long key) {
         ++fetchCounter;
         return heap.get(key);
+    }
+
+    public int getIndex(long key) {
+        return this.heap.getIndex(key);
     }
 
     public EntryData getVictim() {
@@ -95,6 +109,10 @@ final public class BurstBlock {
         return heap.min().second();
     }
 
+    public int compareToVictim(EntryData item) {
+        return c.compare(item.key(), getVictim().key());
+    }
+
     public boolean isFull() { return heap.size() == maximumSize; }
 
     public int capacity() { return this.maximumSize; }
@@ -103,5 +121,9 @@ final public class BurstBlock {
 
     public int size() {
         return heap.size();
+    }
+
+    public void validate() {
+        this.heap.validate();
     }
 }

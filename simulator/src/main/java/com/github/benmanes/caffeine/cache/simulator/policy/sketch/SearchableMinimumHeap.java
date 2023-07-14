@@ -25,6 +25,7 @@ public class SearchableMinimumHeap<K, V> {
     final private static float DEFAULT_LOAD_FACTOR = 1.5f;
     protected K[] heap;
     protected Map<K, V> valuesMap;
+    protected Map<K, Integer> idxMap;
     protected int size;
     protected Comparator<? super K> c;
 
@@ -34,6 +35,7 @@ public class SearchableMinimumHeap<K, V> {
         this.c = c;
         this.heap = (K[]) new Object[capacity];
         this.valuesMap = new HashMap<>(capacity, DEFAULT_LOAD_FACTOR);
+        this.idxMap = new HashMap<>(capacity, DEFAULT_LOAD_FACTOR);
         this.size = 0;
     }
 
@@ -43,6 +45,8 @@ public class SearchableMinimumHeap<K, V> {
         this.heap = (K[]) new Object[capacity];
 
         this.valuesMap = new HashMap<>(capacity, DEFAULT_LOAD_FACTOR);
+        this.idxMap = new HashMap<>(capacity, DEFAULT_LOAD_FACTOR);
+
         int numItemsToMove = Math.min(capacity, other.size);
         for (int i = 0; i < numItemsToMove; ++i) {
             K key = other.heap[i];
@@ -50,6 +54,7 @@ public class SearchableMinimumHeap<K, V> {
 
             this.heap[i] = key;
             this.valuesMap.put(key, value);
+            this.idxMap.put(key, i);
         }
 
         this.size = other.size;
@@ -115,6 +120,17 @@ public class SearchableMinimumHeap<K, V> {
         this.valuesMap.put(k, v);
     }
 
+    public V remove(K k) {
+        int idx = this.idxMap.get(k);
+        V value = this.valuesMap.get(k);
+
+        this.heap[idx] = this.heap[--this.size];
+        downHeap(idx);
+        upHeap(idx);
+
+        return value;
+    }
+
     public Pair<K, V> extractMin() {
         Assert.assertCondition(this.size > 0, "Cannot extract from empty heap");
 
@@ -124,12 +140,17 @@ public class SearchableMinimumHeap<K, V> {
         K replacement = this.heap[--this.size];
         this.heap[0] = replacement;
 
+        if (this.size > 0) {
+            this.idxMap.put(replacement, 0);
+        }
+
         this.heap[this.size] = null;
         if (this.size != 0) {
             downHeap(0);
         }
 
         this.valuesMap.remove(resultKey);
+        this.idxMap.remove(resultKey);
 
         return new ObjectObjectImmutablePair<>(resultKey, resultValue);
     }
@@ -148,12 +169,12 @@ public class SearchableMinimumHeap<K, V> {
         return this.valuesMap.containsKey(key);
     }
 
-    public V get(K key) {
-        if (!contains(key)) {
-            throw new NoSuchElementException(String.format("No element with key %s", key));
-        }
-
+    public @Nullable V get(K key) {
         return this.valuesMap.get(key);
+    }
+
+    public int getIndex(K key) {
+        return this.idxMap.get(key);
     }
 
     public int size() {
@@ -186,12 +207,15 @@ public class SearchableMinimumHeap<K, V> {
             isWellPositioned = c.compare(e, t) <= 0;
 
             if (!isWellPositioned) {
+                this.idxMap.put(t, i);
                 heap[i] = t;
                 i = leftChild;
             }
         }
 
+        this.idxMap.put(e, i);
         heap[i] = e;
+
         return i;
     }
 
@@ -210,11 +234,13 @@ public class SearchableMinimumHeap<K, V> {
             isWellPositioned = c.compare(t, e) <= 0;
 
             if (!isWellPositioned) {
+                this.idxMap.put(t, i);
                 heap[i] = t;
                 i = parent;
             }
         }
 
+        this.idxMap.put(e, i);
         heap[i] = e;
         return i;
     }
@@ -224,6 +250,19 @@ public class SearchableMinimumHeap<K, V> {
 
         while(i-- != 0) {
             downHeap(i);
+        }
+
+        validate();
+    }
+
+    public void validate() {
+        for (int i = 0; i < size; ++i) {
+            final K key = heap[i];
+            Assert.assertCondition(key != null, "Null value found");
+            Assert.assertCondition(this.valuesMap.containsKey(key), () -> String.format("No value stored for the key: %s", key));
+            Assert.assertCondition(this.idxMap.containsKey(key), () -> String.format("No index stored for the key: %s", key));
+            final int expectedIdx = i;
+            Assert.assertCondition(this.idxMap.get(key) == i, () -> String.format("Wrong index stored for the key: %s, expected: %d, got: %d", key, expectedIdx, this.idxMap.get(key)));
         }
     }
 

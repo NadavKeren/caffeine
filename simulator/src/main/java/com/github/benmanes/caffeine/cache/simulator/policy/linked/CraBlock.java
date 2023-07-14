@@ -317,7 +317,11 @@ public final class CraBlock {
     }
 
     public void moveToTail(EntryData entry) {
-        Node node = data.get(entry.key());
+        moveToTail(entry.key());
+    }
+
+    public void moveToTail(long key) {
+        Node node = data.get(key);
         checkState(node != null, "Illegal move to tail");
 
         node.moveToTail();

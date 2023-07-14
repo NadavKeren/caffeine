@@ -323,7 +323,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                     final double burstVictimScore = burstEstimator.getLatencyEstimation(burstVictim.key(), eventTime);
 
                     if (evictScore >= burstVictimScore) {
-                        burstBlock.evict();
+                        burstBlock.removeVictim();
                         burstBlock.admit(evict);
                         policyStats.recordEviction();
                     }
