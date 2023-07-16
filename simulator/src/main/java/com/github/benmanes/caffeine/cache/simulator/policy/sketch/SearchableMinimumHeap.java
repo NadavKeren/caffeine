@@ -72,6 +72,7 @@ public class SearchableMinimumHeap<K, V> {
 
         K[] newHeap = (K[]) new Object[newCapacity];
         Map<K, V> newValuesMap = new HashMap<>(newCapacity, DEFAULT_LOAD_FACTOR);
+        Map<K, Integer> newIdxMap = new HashMap<>(newCapacity, DEFAULT_LOAD_FACTOR);
         int i = 0;
         for (; i < size; ++i) {
             K key = heap[i];
@@ -79,16 +80,22 @@ public class SearchableMinimumHeap<K, V> {
 
             newHeap[i] = key;
             newValuesMap.put(key, value);
+            newIdxMap.put(key, i);
         }
 
-        for (Pair<K, V> itemPair : items) {
-            newHeap[i] = itemPair.first();
-            newValuesMap.put(itemPair.first(), itemPair.second());
-            ++i;
+        if (items != null) {
+            for (Pair<K, V> itemPair : items) {
+                K key = itemPair.first();
+                newHeap[i] = key;
+                newValuesMap.put(key, itemPair.second());
+                newIdxMap.put(key, i);
+                ++i;
+            }
         }
 
         this.heap = newHeap;
         this.valuesMap = newValuesMap;
+        this.idxMap = newIdxMap;
         this.size += items.size();
 
         makeHeap();
@@ -109,6 +116,8 @@ public class SearchableMinimumHeap<K, V> {
             itemsRemoved.add(item);
         }
 
+        validate();
+
         return itemsRemoved;
     }
 
@@ -116,8 +125,8 @@ public class SearchableMinimumHeap<K, V> {
         Assert.assertCondition(this.size <= this.heap.length, "Insertion into full heap");
 
         this.heap[this.size++] = k;
-        upHeap(this.size - 1);
         this.valuesMap.put(k, v);
+        upHeap(this.size - 1);
     }
 
     public V remove(K k) {
@@ -127,6 +136,9 @@ public class SearchableMinimumHeap<K, V> {
         this.heap[idx] = this.heap[--this.size];
         downHeap(idx);
         upHeap(idx);
+
+        this.idxMap.remove(k);
+        this.valuesMap.remove(k);
 
         return value;
     }
@@ -149,8 +161,11 @@ public class SearchableMinimumHeap<K, V> {
             downHeap(0);
         }
 
-        this.valuesMap.remove(resultKey);
-        this.idxMap.remove(resultKey);
+        final V valuesRes = this.valuesMap.remove(resultKey);
+        final Integer idxRes = this.idxMap.remove(resultKey);
+
+        Assert.assertCondition(valuesRes != null, "Got null at values");
+        Assert.assertCondition(idxRes != null, "Got null at indexes");
 
         return new ObjectObjectImmutablePair<>(resultKey, resultValue);
     }
@@ -188,40 +203,46 @@ public class SearchableMinimumHeap<K, V> {
     }
 
     public int downHeap(int i) {
-        assert i < size;
+        final int originIdx = i;
+        Assert.assertCondition(i < size && i >= 0, () -> String.format("Invalid index: %d in size %d", originIdx, size));
 
-        K e = heap[i];
-        int leftChild;
-        K t;
-        int rightChild;
+        K targetItem = heap[i];
+        K minimalChild;
+        int leftChildIdx = (i << 1) + 1;
+        int rightChildIdx = leftChildIdx + 1;
+        int minimalChildIdx;
         boolean isWellPositioned = false;
 
-        while ((leftChild = (i << 1) + 1) < size && !isWellPositioned) {
-            t = heap[leftChild];
-            rightChild = leftChild + 1;
-            if (rightChild < size && c.compare(heap[rightChild], t) < 0) {
-                leftChild = rightChild;
-                t = heap[rightChild];
+        while (leftChildIdx < size && !isWellPositioned) {
+            if (rightChildIdx < size && c.compare(heap[rightChildIdx], heap[leftChildIdx]) < 0) {
+                minimalChildIdx = rightChildIdx;
+                minimalChild = heap[rightChildIdx];
+            } else {
+                minimalChildIdx = leftChildIdx;
+                minimalChild = heap[leftChildIdx];
             }
 
-            isWellPositioned = c.compare(e, t) <= 0;
+            isWellPositioned = c.compare(targetItem, minimalChild) <= 0;
 
             if (!isWellPositioned) {
-                this.idxMap.put(t, i);
-                heap[i] = t;
-                i = leftChild;
+                this.idxMap.put(minimalChild, i);
+                heap[i] = minimalChild;
+                i = minimalChildIdx;
             }
+
+            leftChildIdx = (minimalChildIdx << 1) + 1;
+            rightChildIdx = minimalChildIdx + 1;
         }
 
-        this.idxMap.put(e, i);
-        heap[i] = e;
+        this.idxMap.put(targetItem, i);
+        heap[i] = targetItem;
 
         return i;
     }
 
     public int upHeap(int i) {
         final int originIdx = i;
-        Assert.assertCondition(i < size, () -> String.format("Invalid index: %d in size %d", originIdx, size));
+        Assert.assertCondition(i < size && i >= 0, () -> String.format("Invalid index: %d in size %d", originIdx, size));
 
         K e = heap[i];
         int parent;
@@ -242,6 +263,7 @@ public class SearchableMinimumHeap<K, V> {
 
         this.idxMap.put(e, i);
         heap[i] = e;
+
         return i;
     }
 
@@ -258,9 +280,10 @@ public class SearchableMinimumHeap<K, V> {
     public void validate() {
         for (int i = 0; i < size; ++i) {
             final K key = heap[i];
+            final int idx = i;
             Assert.assertCondition(key != null, "Null value found");
-            Assert.assertCondition(this.valuesMap.containsKey(key), () -> String.format("No value stored for the key: %s", key));
-            Assert.assertCondition(this.idxMap.containsKey(key), () -> String.format("No index stored for the key: %s", key));
+            Assert.assertCondition(this.valuesMap.containsKey(key), () -> String.format("No value stored for the key: %s at index: %d", key, idx));
+            Assert.assertCondition(this.idxMap.containsKey(key), () -> String.format("No index stored for the key: %s at index: %d", key, idx));
             final int expectedIdx = i;
             Assert.assertCondition(this.idxMap.get(key) == i, () -> String.format("Wrong index stored for the key: %s, expected: %d, got: %d", key, expectedIdx, this.idxMap.get(key)));
         }
