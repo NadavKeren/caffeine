@@ -67,6 +67,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowCostAwar
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.AdaptiveCAWithBurstBlockPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.HillClimberWindowTinyLfuPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.Pipeline.AdaptivePipelineCache;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.feedback.FeedbackTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.feedback.FeedbackWindowTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.segment.FullySegmentedWindowTinyLfuPolicy;
@@ -200,6 +201,7 @@ public final class Registry {
     registerMany(GhostHillClimberTinyLfuPolicy.class, GhostHillClimberTinyLfuPolicy::policies);
     registerMany(AdaptiveCAPolicy.class, AdaptiveCAPolicy::policies);
     register(AdaptiveCAWithBurstBlockPolicy.class, AdaptiveCAWithBurstBlockPolicy::policy);
+    register(AdaptivePipelineCache.class, AdaptivePipelineCache::new);
 
     register(TinyCachePolicy.class, TinyCachePolicy::new);
     register(WindowTinyCachePolicy.class, WindowTinyCachePolicy::new);
