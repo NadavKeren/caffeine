@@ -193,27 +193,64 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                                                    hitPenaltyAfter,
                                                    delayedHitPenaltyAfter,
                                                    missPenaltyAfter));
+        if (opsSinceAdaption > 0) {
+            validateStats();
+        }
 
         finished();
     }
 
+    private void validateStats() {
+        for (int i = 0; i < NUM_OF_POSSIBLE_CACHES; ++i) {
+            if (this.ghostCaches[i] != DUMMY) {
+                final int idx = i;
+                final double genAvgPen = this.ghostCaches[i].stats().averagePenalty();
+                final double timeframeAvgPen = this.ghostCaches[i].timeframeStats().timeframeAveragePenalty();
+                Assert.assertCondition(this.ghostCaches[i].timeframeStats().timeframeOperationNumber() > 0,
+                                       () -> String.format("zero operations on cache %d: %s", idx, CacheConfiguration.fromIndex(idx)));
+                Assert.assertCondition(genAvgPen == timeframeAvgPen,
+                                       () -> String.format("penalty mismatch on cache %d: %s: total: %.2f timeframe: %.2f",
+                                                           idx,
+                                                           CacheConfiguration.fromIndex(idx),
+                                                           genAvgPen,
+                                                           timeframeAvgPen));
+            }
+        }
+    }
+
     private void adapt() {
+        validateStats();
+
         Adaption adaption = new Adaption(CacheConfiguration.MAIN,
                                          this.mainCache.timeframeStats().timeframeAveragePenalty());
 
         for (int i = 0; i < NUM_OF_POSSIBLE_CACHES; ++i) {
             double avgPenalty = this.ghostCaches[i].timeframeStats().timeframeAveragePenalty();
 
+            final int idx = i;
+            if (DEBUG) {
+                logger.log(Logger.Level.INFO, ConsoleColors.minorInfoString("%s: avg Pen. %.2f",
+                                                                            CacheConfiguration.fromIndex(idx),
+                                                                            avgPenalty));
+            }
+
             if (avgPenalty < adaption.avgPenalty()) {
                 adaption = new Adaption(CacheConfiguration.fromIndex(i), avgPenalty);
             }
 
-            this.ghostCaches[i].resetTimeframeStats();
+            this.ghostCaches[i].resetStats();
         }
 
         if (adaption.increment() != BlockType.NONE && adaption.decrement() != BlockType.NONE) {
             if (DEBUG) {
-                logger.log(Logger.Level.INFO, ConsoleColors.majorInfoString("main: increasing %s over %s in adaption number %d", adaption.increment().name(), adaption.decrement().name(), adaptionNumber));
+                logger.log(Logger.Level.INFO, ConsoleColors.majorInfoString("main: increasing %s over %s in adaption number %d, avg. before: %.2f, lowest: %.2f total: %.2f",
+                                                                            adaption.increment().name(),
+                                                                            adaption.decrement().name(),
+                                                                            adaptionNumber,
+                                                                            this.mainCache.timeframeStats()
+                                                                                          .timeframeAveragePenalty(),
+                                                                            adaption.avgPenalty,
+                                                                            this.stats.averagePenalty()));
             }
 
             var newCapacityState = CacheCapacityState.fromStateAndAdaptation(currCapacityState, adaption);

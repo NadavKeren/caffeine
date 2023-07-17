@@ -185,6 +185,8 @@ public class ResizableWindowCostAwareWithBurstinessBlockPolicy extends WindowCos
         timeframeStats().resetTimeframeStats();
     }
 
+    public void resetStats() { super.policyStats = new ResettableWCWithBBStats(name); }
+
     @Override
     public void record(AccessEvent event) {
         super.record(event);
@@ -326,8 +328,10 @@ public class ResizableWindowCostAwareWithBurstinessBlockPolicy extends WindowCos
         public void resetTimeframeStats() {
             this.timeframeHitCount = 0;
             this.timeframeMissCount = 0;
+            this.timeframeDelayedHitCount = 0;
             this.timeframeHitPenalty = 0;
             this.timeframeMissPenalty = 0;
+            this.timeframeDelayedHitPenalty = 0;
         }
 
         @Override
@@ -343,7 +347,7 @@ public class ResizableWindowCostAwareWithBurstinessBlockPolicy extends WindowCos
         }
 
         @Override
-        public void recordMiss() {
+        public void recordMiss(double penalty) {
             super.recordMiss();
             ++this.timeframeMissCount;
         }

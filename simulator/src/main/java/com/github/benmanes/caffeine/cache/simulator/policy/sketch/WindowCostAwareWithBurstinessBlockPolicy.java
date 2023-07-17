@@ -19,7 +19,7 @@ import static java.util.stream.Collectors.toSet;
 @Policy.PolicySpec(name = "sketch.WindowCABurstBlock")
 public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
     private static int ID = 0;
-    private final WindowCAWithBBStats policyStats;
+    protected WindowCAWithBBStats policyStats;
     protected final LatencyEstimator<Long> latencyEstimator;
     protected final LatencyEstimator<Long> burstEstimator;
     protected final Admittor admittor;
@@ -545,7 +545,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             this.totalBenefit += missPenalty;
         }
 
-        final public void recordMiss(double missPenalty) {
+        public void recordMiss(double missPenalty) {
             super.recordMiss();
             this.missCosts += missPenalty;
             this.totalBenefit += missPenalty;

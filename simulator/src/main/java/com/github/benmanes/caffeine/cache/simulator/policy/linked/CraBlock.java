@@ -205,6 +205,12 @@ public final class CraBlock {
         return removedItems;
     }
 
+    public void appendItems(List<EntryData> itemsToAppend) {
+        for (EntryData entry : itemsToAppend) {
+            this.addEntry(entry);
+        }
+    }
+
     public void setNormalization(double normalizationBias, double normalizationFactor) {
         this.normalizationBias = normalizationBias;
         this.normalizationFactor = normalizationFactor;
