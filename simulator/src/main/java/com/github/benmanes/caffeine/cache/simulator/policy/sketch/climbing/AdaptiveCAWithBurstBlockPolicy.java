@@ -32,12 +32,12 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
     private final static ResizableWindowCostAwareWithBurstinessBlockPolicy DUMMY = new ResizableWindowCostAwareWithBurstinessBlockPolicy.Dummy();
     private final AdaptiveCAWithBBStats stats;
-    private CacheCapacityState currCapacityState;
+    private CacheState currCapacityState;
 
     final private int adaptionTimeframe;
     private int opsSinceAdaption;
     private int adaptionNumber = 0;
-    private List<CacheCapacityState> capacityHistory;
+    private List<CacheState> capacityHistory;
 
     private final ResizableWindowCostAwareWithBurstinessBlockPolicy[] ghostCaches;
 
@@ -52,7 +52,6 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
             int burstQuota = settings.bcQuota();
             int quantaCount = settings.numOfQuanta();
 
-            currCapacityState = new CacheCapacityState(windowQuota, probationQuota + protectedQuota, burstQuota);
 
             Assert.assertCondition(windowQuota >= 0 && probationQuota >= 0 && protectedQuota >= 0 && burstQuota >= 0,
                                    () -> String.format("Quotas must be non-negative : Window: %d, Probation: %d, Protected: %d, Burst: %d",
@@ -85,6 +84,8 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
             ghostCaches = new ResizableWindowCostAwareWithBurstinessBlockPolicy[NUM_OF_POSSIBLE_CACHES];
             createGhostCaches();
+
+            currCapacityState = new CacheState(this, 0, windowQuota, probationQuota + protectedQuota, burstQuota);
             capacityHistory = new ArrayList<>();
             capacityHistory.add(currCapacityState);
 
@@ -176,7 +177,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
         if (opsSinceAdaption >= adaptionTimeframe && mainCache.isFull()) {
             opsSinceAdaption = 0;
-            adapt();
+            adapt(event.eventNum());
         }
 
         final double hitPenaltyAfter = stats().hitPenalty();
@@ -218,7 +219,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         }
     }
 
-    private void adapt() {
+    private void adapt(int eventNum) {
         validateStats();
 
         Adaption adaption = new Adaption(CacheConfiguration.MAIN,
@@ -253,7 +254,10 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                                                                             this.stats.averagePenalty()));
             }
 
-            var newCapacityState = CacheCapacityState.fromStateAndAdaptation(currCapacityState, adaption);
+            var newCapacityState = CacheState.fromStateAndAdaptation(this,
+                                                                     eventNum,
+                                                                     currCapacityState,
+                                                                     adaption);
 
             capacityHistory.add(newCapacityState);
             currCapacityState = newCapacityState;
@@ -272,6 +276,15 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
             }
 
             createGhostCaches();
+        } else {
+            var newCapacityState = new CacheState(this,
+                                                  eventNum,
+                                                  currCapacityState.lruCapacity,
+                                                  currCapacityState.lfuCapacity,
+                                                  currCapacityState.bcCapacity);
+
+            capacityHistory.add(newCapacityState);
+            currCapacityState = newCapacityState;
         }
 
         ++this.adaptionNumber;
@@ -583,18 +596,31 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         }
     }
 
-    private static class CacheCapacityState {
+    private static class CacheState {
+        final private int eventNum;
         final private int lruCapacity;
         final private int lfuCapacity;
         final private int bcCapacity;
+        final private double hitRate;
+        final private double avgPenalty;
 
-        private CacheCapacityState(int lruCapacity, int lfuCapacity, int bcCapacity) {
+        private CacheState(AdaptiveCAWithBurstBlockPolicy policy,
+                           int eventNum,
+                           int lruCapacity,
+                           int lfuCapacity,
+                           int bcCapacity) {
+            this.eventNum = eventNum;
             this.lruCapacity = lruCapacity;
             this.lfuCapacity = lfuCapacity;
             this.bcCapacity = bcCapacity;
+            this.hitRate = policy.stats.hitRate();
+            this.avgPenalty = policy.stats.averagePenalty();
         }
 
-        protected static CacheCapacityState fromStateAndAdaptation(CacheCapacityState state, Adaption adaption) {
+        protected static CacheState fromStateAndAdaptation(AdaptiveCAWithBurstBlockPolicy policy,
+                                                    int eventNum,
+                                                    CacheState state,
+                                                    Adaption adaption) {
             int currentLRU = state.lruCapacity();
             int currentLFU = state.lfuCapacity();
             int currentBC = state.bcCapacity();
@@ -629,7 +655,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                     throw new IllegalStateException("Bad adaption");
             }
 
-            return new CacheCapacityState(currentLRU, currentLFU, currentBC);
+            return new CacheState(policy, eventNum, currentLRU, currentLFU, currentBC);
         }
 
         private int lruCapacity() {
@@ -646,7 +672,13 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
         @Override
         public String toString() {
-            return lruCapacity + "," + lfuCapacity + "," + bcCapacity;
+            return String.format("%d,%d,%d,%d,%.2f,%.2f",
+                                 eventNum,
+                                 lruCapacity,
+                                 lfuCapacity,
+                                 bcCapacity,
+                                 hitRate * 100,
+                                 avgPenalty);
         }
     }
 }

@@ -29,10 +29,17 @@ import com.google.common.base.MoreObjects;
 public class AccessEvent {
   private final long key;
   private EventStatus status = EventStatus.MISS;
+  private int eventNum = -1;
 
   private AccessEvent(long key) {
     this.key = key;
   }
+
+  public void setEventNum(int eventNum) {
+    this.eventNum = eventNum;
+  }
+
+  public int eventNum() { return eventNum; }
 
   /** Returns the key. */
   public long key() {

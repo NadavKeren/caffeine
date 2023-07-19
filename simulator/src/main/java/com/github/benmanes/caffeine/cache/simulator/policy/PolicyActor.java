@@ -61,11 +61,11 @@ public final class PolicyActor extends AbstractBehavior<PolicyActor.Command> {
   private Behavior<Command> process(List<AccessEvent> events) {
     policy.stats().stopwatch().start();
     for (AccessEvent event : events) {
+      event.setEventNum(eventNumber++);
       try {
         policy.record(event);
-        ++eventNumber;
       } catch (RuntimeException e) {
-        System.err.println("Error on event: " + eventNumber);
+        System.err.println("Error on event: " + event.eventNum());
         e.printStackTrace();
         System.exit(1);
       }
