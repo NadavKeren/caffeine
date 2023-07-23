@@ -45,18 +45,24 @@ public class BurstCache implements PipelineBlock {
     }
 
     private void addToGhostIfBetter(EntryData item) {
-        if (!ghostBlock.isFull()) {
-            ghostBlock.admit(item);
-        } else if (ghostBlock.compareToVictim(item) > 0) {
-            ghostBlock.removeVictim();
-            ghostBlock.admit(item);
+        if (!ghostBlock.isHit(item.key())) {
+            if (!ghostBlock.isFull()) {
+                ghostBlock.admit(item);
+            } else if (ghostBlock.compareToVictim(item) > 0) {
+                ghostBlock.removeVictim();
+                ghostBlock.admit(item);
+            }
         }
     }
 
     private @Nullable EntryData addToCacheIfBetter(EntryData item) {
         EntryData evicted = null;
 
-        if (!ghostBlock.isFull()) {
+        if (ghostBlock.isHit(item.key())) {
+            ghostBlock.remove(item.key());
+        }
+
+        if (!block.isFull()) {
             block.admit(item);
         } else if (block.compareToVictim(item) > 0) {
             evicted = block.removeVictim();

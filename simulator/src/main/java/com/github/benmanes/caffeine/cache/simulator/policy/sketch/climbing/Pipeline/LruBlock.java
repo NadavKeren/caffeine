@@ -118,13 +118,17 @@ public class LruBlock implements PipelineBlock {
     public EntryData insert(EntryData data) {
         EntryData victim = null;
 
-        if (!endBlock.isFull()) {
+        if (ghostBlock.isHit(data.key())) {
+            ghostBlock.remove(data.key());
+        }
+
+        if (endBlock.size() < endBlock.capacity()) {
             Assert.assertCondition(block.size() == 0, "Should fill the end-of-block before the block itself");
             endBlock.addEntry(data);
         } else {
             block.addEntry(data);
 
-            if (block.isFull()) {
+            if (block.size() > block.capacity()) {
                 victim = block.removeVictim();
                 endBlock.addEntry(victim);
 
@@ -136,6 +140,10 @@ public class LruBlock implements PipelineBlock {
                 }
             }
         }
+        Assert.assertCondition(endBlock.size() <= endBlock.capacity()
+                               && block.size() <= block.capacity()
+                               && ghostBlock.size() <= ghostBlock.capacity(),
+                               "LRU: Size overflow");
 
         return victim;
     }

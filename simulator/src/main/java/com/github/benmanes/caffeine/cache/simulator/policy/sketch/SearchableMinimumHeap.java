@@ -123,7 +123,7 @@ public class SearchableMinimumHeap<K, V> {
 
     public void insert(K k, V v) {
         Assert.assertCondition(this.size <= this.heap.length, "Insertion into full heap");
-
+        Assert.assertCondition(!this.idxMap.containsKey(k), "Inserting duplicate item");
         this.heap[this.size++] = k;
         this.valuesMap.put(k, v);
         upHeap(this.size - 1);
@@ -134,8 +134,10 @@ public class SearchableMinimumHeap<K, V> {
         V value = this.valuesMap.get(k);
 
         this.heap[idx] = this.heap[--this.size];
-        downHeap(idx);
-        upHeap(idx);
+        if (idx < size) {
+            downHeap(idx);
+            upHeap(idx);
+        }
 
         this.idxMap.remove(k);
         this.valuesMap.remove(k);
@@ -244,25 +246,25 @@ public class SearchableMinimumHeap<K, V> {
         final int originIdx = i;
         Assert.assertCondition(i < size && i >= 0, () -> String.format("Invalid index: %d in size %d", originIdx, size));
 
-        K e = heap[i];
-        int parent;
-        K t;
+        K target = heap[i];
+        int parentIdx;
+        K parentKey;
         boolean isWellPositioned = false;
 
         while(i != 0 && !isWellPositioned) {
-            parent = (i - 1) >>> 1;
-            t = heap[parent];
-            isWellPositioned = c.compare(t, e) <= 0;
+            parentIdx = (i - 1) >>> 1;
+            parentKey = heap[parentIdx];
+            isWellPositioned = c.compare(parentKey, target) <= 0;
 
             if (!isWellPositioned) {
-                this.idxMap.put(t, i);
-                heap[i] = t;
-                i = parent;
+                this.idxMap.put(parentKey, i);
+                heap[i] = parentKey;
+                i = parentIdx;
             }
         }
 
-        this.idxMap.put(e, i);
-        heap[i] = e;
+        this.idxMap.put(target, i);
+        heap[i] = target;
 
         return i;
     }
@@ -285,9 +287,36 @@ public class SearchableMinimumHeap<K, V> {
             Assert.assertCondition(this.valuesMap.containsKey(key), () -> String.format("No value stored for the key: %s at index: %d", key, idx));
             Assert.assertCondition(this.idxMap.containsKey(key), () -> String.format("No index stored for the key: %s at index: %d", key, idx));
             final int expectedIdx = i;
-            Assert.assertCondition(this.idxMap.get(key) == i, () -> String.format("Wrong index stored for the key: %s, expected: %d, got: %d", key, expectedIdx, this.idxMap.get(key)));
+            final int storedIdx = this.idxMap.get(key);
+            Assert.assertCondition(storedIdx == i, () -> String.format("Wrong index stored for the key: %s, expected: %d, got: %d", key, expectedIdx, this.idxMap.get(key)));
         }
     }
+
+//    private String heapToStringAndBoldAt(int pos) {
+//        StringBuilder sb = new StringBuilder();
+//        sb.append("[");
+//        for (int idx = 0; idx < size - 1; ++idx) {
+//            if (idx == pos) {
+//                sb.append(ConsoleColors.YELLOW_BOLD);
+//                sb.append(heap[idx]);
+//                sb.append(ConsoleColors.RESET);
+//            } else {
+//                sb.append(heap[idx]);
+//            }
+//            sb.append(", ");
+//        }
+//
+//        if (pos == size - 1) {
+//            sb.append(ConsoleColors.YELLOW_BOLD);
+//            sb.append(heap[size - 1]);
+//            sb.append(ConsoleColors.RESET);
+//        } else {
+//            sb.append(heap[size - 1]);
+//        }
+//        sb.append("]");
+//
+//        return sb.toString();
+//    }
 
     private PrintWriter prepareFileWriter() {
         LocalDateTime currentTime = LocalDateTime.now(ZoneId.systemDefault());

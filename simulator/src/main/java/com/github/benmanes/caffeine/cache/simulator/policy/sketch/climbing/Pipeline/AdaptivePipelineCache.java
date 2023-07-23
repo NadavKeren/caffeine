@@ -45,12 +45,13 @@ public class AdaptivePipelineCache implements Policy {
     final private LatencyEstimator<Long> burstEstimator;
     final PipelineBlock[] blocks;
     final int[] blockQuotas;
+    final String[] types;
     final private AdaptivePipelineStats stats;
 
     // TODO: find a way to share these without losing the generic value of this class
 
 
-    final private List<int[]> blockQuotaHistory;
+    final private List<StateSnapshot> blockQuotaHistory;
 
     public AdaptivePipelineCache(Config config) {
         var settings = new AdaptivePipelineSettings(config);
@@ -67,7 +68,7 @@ public class AdaptivePipelineCache implements Policy {
         blockQuotas = new int[blockCount];
 
         final var blockConfigs = settings.blocksConfigs();
-        final String[] types = new String[blockCount];
+        types = new String[blockCount];
         latencyEstimator = new LatestLatencyEstimator<>();
         burstEstimator = new MovingAverageBurstLatencyEstimator<>(settings.agingWindowSize(),
                                                                   settings.ageSmoothFactor(),
@@ -92,10 +93,16 @@ public class AdaptivePipelineCache implements Policy {
                                                    accumulatedQuota));
 
 
-        stats = new AdaptivePipelineStats(buildName(types));
+        String name = buildName(types);
+        stats = new AdaptivePipelineStats(name);
+
+        if (DEBUG) {
+            logger.log(Logger.Level.INFO, ConsoleColors.majorInfoString("Created: %s", name));
+            Assert.assertCondition(cacheCapacity == settings.maximumSize(), () -> String.format("Size mismatch: expected: %d got: %d", settings.maximumSize(), cacheCapacity));
+        }
 
         blockQuotaHistory = new ArrayList<>();
-        blockQuotaHistory.add(getQuotaSnapshot());
+        blockQuotaHistory.add(new StateSnapshot(0));
     }
 
     private String buildName(String[] types) {
@@ -164,16 +171,19 @@ public class AdaptivePipelineCache implements Policy {
 
         ++opsSinceAdaption;
 
-        if (opsSinceAdaption >= adaptionTimeframe) {
+        if (opsSinceAdaption >= adaptionTimeframe && size() >= cacheCapacity) {
             opsSinceAdaption = 0;
-            adapt();
+            adapt(event.eventNum());
         }
 
-        validate();
+//        validate();
     }
 
     private void onMiss(AccessEvent event) {
         EntryData newItem = new EntryData(event);
+
+        latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
+        burstEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
 
         for (int idx = 0; idx < blockCount; ++idx) {
             if (newItem != null) {
@@ -181,12 +191,13 @@ public class AdaptivePipelineCache implements Policy {
             }
         }
 
+        if (newItem != null) {
+            stats.recordEviction();
+        }
+
         stats.recordMiss();
         stats.recordMissPenalty(event.missPenalty());
         event.changeEventStatus(AccessEvent.EventStatus.MISS);
-
-        latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
-        burstEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
     }
 
     private void recordAccordingToAvailability(EntryData entry, AccessEvent currEvent) {
@@ -212,7 +223,7 @@ public class AdaptivePipelineCache implements Policy {
         }
     }
 
-    private void adapt() {
+    private void adapt(int eventNum) {
         double maxBenefit = 0;
         double minCost = Double.MAX_VALUE;
         int maxBenefitIdx = -1;
@@ -221,20 +232,31 @@ public class AdaptivePipelineCache implements Policy {
         for (int idx = 0; idx < blockCount; ++idx) {
             double currentBenefit = blocks[idx].getExpansionBenefit();
 
-            if (currentBenefit > maxBenefit) {
+            if (currentBenefit > maxBenefit && blockQuotas[idx] < totalQuota) {
                 maxBenefit = currentBenefit;
                 maxBenefitIdx = idx;
             }
 
             double currentCost = blocks[idx].getShrinkCost();
 
-            if (currentCost < minCost) {
+            if (currentCost < minCost && blockQuotas[idx] > 0) {
                 minCost = currentCost;
                 minCostIdx = idx;
             }
+
+            if (DEBUG) {
+                logger.log(Logger.Level.INFO, ConsoleColors.minorInfoString("%s: EB: %.2f SC: %.2f", this.types[idx], currentBenefit, currentCost));
+            }
+        }
+
+        if (DEBUG) {
+            logger.log(Logger.Level.INFO, ConsoleColors.infoString("max EB: %.2f at: %s min SC: %.2f at %s", maxBenefit, types[maxBenefitIdx], minCost, types[minCostIdx]));
         }
 
         if (maxBenefit > minCost && maxBenefitIdx != minCostIdx) {
+            Assert.assertCondition(blockQuotas[maxBenefitIdx] < totalQuota, "Illegal Increment requested");
+            Assert.assertCondition(blockQuotas[minCostIdx] > 0, "Illegal Decrement requested");
+
             List<EntryData> items = blocks[minCostIdx].decreaseSize();
 
             blocks[maxBenefitIdx].increaseSize(items);
@@ -244,13 +266,23 @@ public class AdaptivePipelineCache implements Policy {
 
             if (DEBUG) {
                 logger.log(System.Logger.Level.INFO,
-                           ConsoleColors.infoString("creating ghost caches, adaption number %d", adaptionNumber));
-
-                blockQuotaHistory.add(getQuotaSnapshot());
+                           ConsoleColors.majorInfoString("Event: %d, Adaption %d: Inc: %s\tDec: %s",
+                                                         eventNum,
+                                                         adaptionNumber,
+                                                         types[maxBenefitIdx],
+                                                         types[minCostIdx]));
             }
         }
 
+        blockQuotaHistory.add(new StateSnapshot(eventNum));
+
+        for (int idx = 0; idx < blockCount; ++idx) {
+            blocks[idx].resetStats();
+        }
+
         ++adaptionNumber;
+
+        validate();
     }
 
     @Override
@@ -258,11 +290,27 @@ public class AdaptivePipelineCache implements Policy {
         validate();
     }
 
-    private void validate() {
+    public int size() {
         int accumulatedSize = 0;
         for (PipelineBlock block : blocks) {
+            accumulatedSize += block.size();
+        }
+
+        return accumulatedSize;
+    }
+
+    private void validate() {
+        int accumulatedSize = 0;
+        for (int idx = 0; idx < blockCount; ++idx) {
+            PipelineBlock block = blocks[idx];
             block.validate();
             accumulatedSize += block.size();
+            final int blockIdx = idx;
+            Assert.assertCondition(block.size() <= block.capacity(),
+                                   () -> String.format("block %s exceeding its capacity", types[blockIdx]));
+            Assert.assertCondition(block.capacity() == blockQuotas[idx] * quantumSize,
+                                   () -> String.format("block %s has wrong capacity", types[blockIdx]));
+
         }
 
         final int finalAccumulatedSize = accumulatedSize;
@@ -298,27 +346,13 @@ public class AdaptivePipelineCache implements Policy {
         return writer;
     }
 
-    private int[] getQuotaSnapshot() {
-        int[] snapshot = new int[blockCount];
-
-        System.arraycopy(blockQuotas, 0, snapshot, 0, blockCount);
-
-        return snapshot;
-    }
-
     @Override
     public void dump() {
         if (DEBUG) {
             PrintWriter writer = prepareFileWriter();
 
-            for (int[] state: blockQuotaHistory) {
-                for (int i = 0; i < state.length; ++i) {
-                    writer.print(state[i]);
-                    if (i < state.length - 1) {
-                        writer.print(',');
-                    }
-                }
-                writer.println();
+            for (StateSnapshot state: blockQuotaHistory) {
+                writer.println(state);
             }
 
             writer.close();
@@ -339,11 +373,11 @@ public class AdaptivePipelineCache implements Policy {
 
         public int quantumSize() { return config().getInt(BASE_PATH + ".quantum-size"); }
 
-        public int agingWindowSize() {return config().getInt(BASE_PATH + "burst.aging-window-size");}
+        public int agingWindowSize() {return config().getInt(BASE_PATH + ".burst.aging-window-size");}
 
-        public double ageSmoothFactor() {return config().getDouble(BASE_PATH + "burst.age-smoothing");}
+        public double ageSmoothFactor() {return config().getDouble(BASE_PATH + ".burst.age-smoothing");}
 
-        public int numOfPartitions() {return config().getInt(BASE_PATH + "burst.number-of-partitions");}
+        public int numOfPartitions() {return config().getInt(BASE_PATH + ".burst.number-of-partitions");}
 
         public List<Config> blocksConfigs() {
             final int numOfBlocks = numOfBlocks();
@@ -393,6 +427,44 @@ public class AdaptivePipelineCache implements Policy {
 
         public void recordHitAtBlock(int idx) {
             ++hitCountsPerBlock[idx];
+        }
+    }
+
+    private class StateSnapshot {
+        final int eventNum;
+        final int[] quotas;
+        final double hitRate;
+        final double avgPenalty;
+
+        public StateSnapshot(int eventNum) {
+            this.eventNum = eventNum;
+            this.quotas = getQuotaSnapshot();
+            this.hitRate = stats.hitRate();
+            this.avgPenalty = stats.averagePenalty();
+        }
+
+        private int[] getQuotaSnapshot() {
+            int[] snapshot = new int[blockCount];
+
+            System.arraycopy(blockQuotas, 0, snapshot, 0, blockCount);
+
+            return snapshot;
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append(eventNum);
+            sb.append(",");
+            for (int idx = 0; idx < blockCount; ++idx) {
+                sb.append(quotas[idx]);
+                sb.append(",");
+            }
+
+            sb.append(String.format("%.2f,", hitRate * 100));
+            sb.append(String.format("%.2f", avgPenalty));
+
+            return sb.toString();
         }
     }
 }

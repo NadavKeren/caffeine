@@ -16,6 +16,7 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.linked;
 
 
+import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.ConsoleColors;
 import com.github.benmanes.caffeine.cache.simulator.UneditableLatencyEstimatorProxy;
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
@@ -203,6 +204,16 @@ public final class CraBlock {
         }
 
         return removedItems;
+    }
+
+    public void decreaseCapacity(int amount) {
+        Assert.assertCondition(size() <= maximumSize - amount, "Need to remove items before shrink");
+
+        this.maximumSize -= amount;
+    }
+
+    public void increaseCapacity(int amount) {
+        this.maximumSize += amount;
     }
 
     public void appendItems(List<EntryData> itemsToAppend) {

@@ -37,7 +37,7 @@ public class LfuBlock implements PipelineBlock {
             this.probationBlock = new CraBlock(decayFactor, maxLists, quantumSize, latencyEstimator, "probation");
             this.protectedBlock = new CraBlock(decayFactor,
                                                maxLists,
-                                               (initialQuota * quantumSize),
+                                               ((initialQuota - 1) * quantumSize),
                                                latencyEstimator,
                                                "protected");
         } else {
@@ -63,7 +63,7 @@ public class LfuBlock implements PipelineBlock {
         if (probationBlock.capacity() == 0) {
             probationBlock.increaseSize(quantumSize, items);
         } else {
-            protectedBlock.increaseSize(quantumSize, new ArrayList<>());
+            protectedBlock.increaseCapacity(quantumSize);
             probationBlock.appendItems(items);
         }
 
@@ -95,6 +95,14 @@ public class LfuBlock implements PipelineBlock {
             }
         }
 
+        capacity -= quantumSize;
+
+        if (protectedBlock.capacity() > 0) {
+            protectedBlock.decreaseCapacity(quantumSize);
+        } else {
+            probationBlock.decreaseCapacity(quantumSize);
+        }
+
         return items;
     }
 
@@ -109,12 +117,12 @@ public class LfuBlock implements PipelineBlock {
                                () -> String.format("Found key %d in multiple parts: %b, %b, %b", key, isInProtected, isInProbation, isInGhost));
 
         EntryData entry = null;
-        if (isInProtected) {
+        if (isInProbation) {
             entry = probationBlock.get(key);
             promoteToProtected(entry);
 
             shrinkCost += entry.event().missPenalty() * probationCostFactor();
-        } else if (isInProbation) {
+        } else if (isInProtected) {
             entry = protectedBlock.get(key);
             protectedBlock.moveToTail(key);
         } else if (isInGhost) {
@@ -131,7 +139,7 @@ public class LfuBlock implements PipelineBlock {
         probationBlock.remove(entry.key());
         protectedBlock.addEntry(entry);
 
-        if (protectedBlock.isFull()) {
+        if (protectedBlock.size() >= protectedBlock.capacity()) {
             EntryData demote = protectedBlock.findVictim();
             protectedBlock.remove(demote.key());
             probationBlock.addEntry(demote);
@@ -146,6 +154,8 @@ public class LfuBlock implements PipelineBlock {
     @Override
     public EntryData insert(EntryData data) {
         EntryData evicted = null;
+        final int sizeBefore = size();
+
         if (probationBlock.size() + protectedBlock.size() >= capacity) {
             EntryData victim = probationBlock.findVictim();
             boolean shouldAdmit = admittor.admit(data.key(), victim.key());
@@ -153,13 +163,22 @@ public class LfuBlock implements PipelineBlock {
             if (shouldAdmit) {
                 evicted = probationBlock.removeVictim();
                 probationBlock.addEntry(data);
+            } else {
+                evicted = data;
+            }
+
+            if (ghostBlock.isHit(data.key())) {
+                ghostBlock.remove(data.key());
             }
         } else {
             probationBlock.addEntry(data);
+
+            Assert.assertCondition (!ghostBlock.isHit(data.key()),
+                                    () -> String.format("LFU: item %d exists in ghost, but cache not full", data.key()));
         }
 
         if (evicted != null) {
-            if (ghostBlock.isFull()) {
+            if (ghostBlock.size() >= ghostBlock.capacity()) {
                 boolean shouldAdmitToGhost = admittor.admit(evicted.key(), ghostBlock.findVictim().key());
                 if (shouldAdmitToGhost) {
                     ghostBlock.removeVictim();
@@ -170,6 +189,12 @@ public class LfuBlock implements PipelineBlock {
             }
         }
 
+        Assert.assertCondition(protectedBlock.size() <= protectedBlock.capacity()
+                               && probationBlock.size() + protectedBlock.size() <= this.capacity()
+                               && ghostBlock.size() <= ghostBlock.capacity(),
+                               "LFU: Size overflow");
+
+        Assert.assertCondition(sizeBefore < capacity() || evicted != null, "Got no evicted item when the cache is full");
         return evicted;
     }
 
@@ -193,6 +218,8 @@ public class LfuBlock implements PipelineBlock {
         final int size = size();
         Assert.assertCondition(size <= capacity,
                                () -> String.format("Size overflow: size: %d, capacity: %d", size, capacity));
+        Assert.assertCondition(capacity == probationBlock.capacity() + protectedBlock.capacity(),
+                               () -> String.format("Capacity mismatch. Total: %d, probation: %d, protected: %d", capacity, probationBlock.capacity(), protectedBlock.capacity()));
     }
 
     @Override
