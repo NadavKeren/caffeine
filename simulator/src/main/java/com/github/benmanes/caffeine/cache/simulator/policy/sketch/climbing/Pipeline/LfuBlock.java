@@ -156,25 +156,28 @@ public class LfuBlock implements PipelineBlock {
         EntryData evicted = null;
         final int sizeBefore = size();
 
-        if (probationBlock.size() + protectedBlock.size() >= capacity) {
-            EntryData victim = probationBlock.findVictim();
-            boolean shouldAdmit = admittor.admit(data.key(), victim.key());
+        if (capacity > 0) {
+            if (probationBlock.size() + protectedBlock.size() >= capacity) {
+                EntryData victim = probationBlock.findVictim();
+                boolean shouldAdmit = admittor.admit(data.key(), victim.key());
 
-            if (shouldAdmit) {
-                evicted = probationBlock.removeVictim();
-                probationBlock.addEntry(data);
+                if (shouldAdmit) {
+                    evicted = probationBlock.removeVictim();
+                    probationBlock.addEntry(data);
+                } else {
+                    evicted = data;
+                }
+
+                if (ghostBlock.isHit(data.key())) {
+                    ghostBlock.remove(data.key());
+                }
             } else {
-                evicted = data;
-            }
+                probationBlock.addEntry(data);
 
-            if (ghostBlock.isHit(data.key())) {
-                ghostBlock.remove(data.key());
+                Assert.assertCondition(!ghostBlock.isHit(data.key()),
+                                       () -> String.format("LFU: item %d exists in ghost, but cache not full",
+                                                           data.key()));
             }
-        } else {
-            probationBlock.addEntry(data);
-
-            Assert.assertCondition (!ghostBlock.isHit(data.key()),
-                                    () -> String.format("LFU: item %d exists in ghost, but cache not full", data.key()));
         }
 
         if (evicted != null) {
@@ -194,7 +197,7 @@ public class LfuBlock implements PipelineBlock {
                                && ghostBlock.size() <= ghostBlock.capacity(),
                                "LFU: Size overflow");
 
-        Assert.assertCondition(sizeBefore < capacity() || evicted != null, "Got no evicted item when the cache is full");
+        Assert.assertCondition(sizeBefore < capacity() || capacity() == 0 || evicted != null, "Got no evicted item when the cache is full");
         return evicted;
     }
 

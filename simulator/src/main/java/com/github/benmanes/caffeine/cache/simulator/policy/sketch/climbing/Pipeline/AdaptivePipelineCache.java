@@ -249,11 +249,12 @@ public class AdaptivePipelineCache implements Policy {
             }
         }
 
-        if (DEBUG) {
-            logger.log(Logger.Level.INFO, ConsoleColors.infoString("max EB: %.2f at: %s min SC: %.2f at %s", maxBenefit, types[maxBenefitIdx], minCost, types[minCostIdx]));
-        }
 
         if (maxBenefit > minCost && maxBenefitIdx != minCostIdx) {
+            if (DEBUG) {
+                logger.log(Logger.Level.INFO, ConsoleColors.infoString("max EB: %.2f at: %s min SC: %.2f at %s", maxBenefit, types[maxBenefitIdx], minCost, types[minCostIdx]));
+            }
+
             Assert.assertCondition(blockQuotas[maxBenefitIdx] < totalQuota, "Illegal Increment requested");
             Assert.assertCondition(blockQuotas[minCostIdx] > 0, "Illegal Decrement requested");
 

@@ -293,11 +293,11 @@ public final class CraBlock {
                 victim = currVictim;
             }
         }
-        checkState(victim != null,
-                   "CRA Block - maxlists: %s\n\n victim is null! activeLists = %s\nlists=%s",
-                   maxLists,
-                   java.util.Arrays.toString(activeLists.toArray()),
-                   java.util.Arrays.toString(lists));
+        Assert.assertCondition(victim != null,
+                               () -> String.format("CRA Block - maxlists: %s\n\n victim is null! activeLists = %s\nlists=%s",
+                               maxLists,
+                               java.util.Arrays.toString(activeLists.toArray()),
+                               java.util.Arrays.toString(lists)));
 
         return victim;
     }
