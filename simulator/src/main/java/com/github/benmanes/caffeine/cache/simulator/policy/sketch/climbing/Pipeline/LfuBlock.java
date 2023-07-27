@@ -51,10 +51,6 @@ public class LfuBlock implements PipelineBlock {
     }
 
 
-    /*
-     * The cost of shrink will be (quantumSize / probationSize) * latency as an approximation
-     * instead of doing additional part for the "end of cache"
-     */
     @Override
     public void increaseSize(List<EntryData> items) {
         Assert.assertCondition(items.size() <= quantumSize, "Offered too many items on increase");
@@ -106,6 +102,10 @@ public class LfuBlock implements PipelineBlock {
         return items;
     }
 
+    /*
+     * The cost of shrink will be (quantumSize / probationSize) * latency as an approximation
+     * instead of doing additional part for the "end of cache"
+     */
     @Nullable
     @Override
     public EntryData getEntry(long key) {
@@ -223,6 +223,10 @@ public class LfuBlock implements PipelineBlock {
                                () -> String.format("Size overflow: size: %d, capacity: %d", size, capacity));
         Assert.assertCondition(capacity == probationBlock.capacity() + protectedBlock.capacity(),
                                () -> String.format("Capacity mismatch. Total: %d, probation: %d, protected: %d", capacity, probationBlock.capacity(), protectedBlock.capacity()));
+        Assert.assertCondition(ghostBlock.size() <= ghostBlock.capacity(),
+                               () -> String.format("Ghost block overflow: size: %d, capacity %d",
+                                                   ghostBlock.size(),
+                                                   ghostBlock.capacity()));
     }
 
     @Override

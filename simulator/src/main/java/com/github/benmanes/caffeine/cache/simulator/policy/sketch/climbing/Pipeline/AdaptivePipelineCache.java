@@ -13,6 +13,8 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.LatestLatencyE
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.MovingAverageBurstLatencyEstimator;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigException;
+import it.unimi.dsi.fastutil.Pair;
+import it.unimi.dsi.fastutil.doubles.DoubleIntImmutablePair;
 
 import java.io.FileWriter;
 import java.io.IOException;
@@ -23,6 +25,8 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.lang.System.Logger;
 
@@ -224,54 +228,66 @@ public class AdaptivePipelineCache implements Policy {
     }
 
     private void adapt(int eventNum) {
-        double maxBenefit = 0;
-        double minCost = Double.MAX_VALUE;
-        int maxBenefitIdx = -1;
-        int minCostIdx = -1;
+        List<Pair<Double, Integer>> sortedByExpansionBenefit = new ArrayList<>(blockCount);
+        List<Pair<Double, Integer>> sortedByShrinkCost = new ArrayList<>(blockCount);
 
         for (int idx = 0; idx < blockCount; ++idx) {
-            double currentBenefit = blocks[idx].getExpansionBenefit();
 
-            if (currentBenefit > maxBenefit && blockQuotas[idx] < totalQuota) {
-                maxBenefit = currentBenefit;
-                maxBenefitIdx = idx;
-            }
+            double currentBenefit = blockQuotas[idx] < totalQuota ? blocks[idx].getExpansionBenefit() : 0;
+            double currentCost = blockQuotas[idx] > 0 ? blocks[idx].getShrinkCost() : Double.MAX_VALUE;
 
-            double currentCost = blocks[idx].getShrinkCost();
+            sortedByExpansionBenefit.add(new DoubleIntImmutablePair(currentBenefit, idx));
+            sortedByShrinkCost.add(new DoubleIntImmutablePair(currentCost, idx));
 
-            if (currentCost < minCost && blockQuotas[idx] > 0) {
-                minCost = currentCost;
-                minCostIdx = idx;
-            }
 
             if (DEBUG) {
                 logger.log(Logger.Level.INFO, ConsoleColors.minorInfoString("%s: EB: %.2f SC: %.2f", this.types[idx], currentBenefit, currentCost));
             }
         }
 
+        Collections.sort(sortedByExpansionBenefit, Comparator.comparingInt(Pair::right));
+        Collections.sort(sortedByShrinkCost, (l1, l2) -> (l2.right() - l1.right()));
 
-        if (maxBenefit > minCost && maxBenefitIdx != minCostIdx) {
+        int incIdx = 0;
+        int decIdx = 0;
+        boolean wasFound = false;
+
+        for (int i = 0; i < blockCount && !wasFound; ++i) {
+            for (int j = 0; j < blockCount && !wasFound; ++j) {
+                var currMaxExp = sortedByExpansionBenefit.get(i);
+                var currMinCost = sortedByShrinkCost.get(j);
+                if (!currMaxExp.right().equals(currMinCost.right())
+                    && currMaxExp.left().compareTo(currMinCost.left()) > 0) {
+                    incIdx = currMaxExp.right();
+                    decIdx = currMinCost.right();
+                    wasFound = true;
+                }
+            }
+        }
+
+
+        if (wasFound) {
             if (DEBUG) {
-                logger.log(Logger.Level.INFO, ConsoleColors.infoString("max EB: %.2f at: %s min SC: %.2f at %s", maxBenefit, types[maxBenefitIdx], minCost, types[minCostIdx]));
+                logger.log(Logger.Level.INFO, ConsoleColors.infoString("max difference at: %s and %s", types[incIdx], types[decIdx]));
             }
 
-            Assert.assertCondition(blockQuotas[maxBenefitIdx] < totalQuota, "Illegal Increment requested");
-            Assert.assertCondition(blockQuotas[minCostIdx] > 0, "Illegal Decrement requested");
+            Assert.assertCondition(blockQuotas[incIdx] < totalQuota, "Illegal Increment requested");
+            Assert.assertCondition(blockQuotas[decIdx] > 0, "Illegal Decrement requested");
 
-            List<EntryData> items = blocks[minCostIdx].decreaseSize();
+            List<EntryData> items = blocks[decIdx].decreaseSize();
 
-            blocks[maxBenefitIdx].increaseSize(items);
+            blocks[incIdx].increaseSize(items);
 
-            ++blockQuotas[maxBenefitIdx];
-            --blockQuotas[minCostIdx];
+            ++blockQuotas[incIdx];
+            --blockQuotas[decIdx];
 
             if (DEBUG) {
                 logger.log(System.Logger.Level.INFO,
                            ConsoleColors.majorInfoString("Event: %d, Adaption %d: Inc: %s\tDec: %s",
                                                          eventNum,
                                                          adaptionNumber,
-                                                         types[maxBenefitIdx],
-                                                         types[minCostIdx]));
+                                                         types[incIdx],
+                                                         types[decIdx]));
             }
         }
 
