@@ -46,7 +46,7 @@ import net.autobuilder.AutoBuilder;
 public class PolicyStats {
   private final Map<String, Metric> metrics;
   private final Stopwatch stopwatch;
-  private final String name;
+  protected final String name;
 
   private long hitCount;
   private long delayedHitCount;

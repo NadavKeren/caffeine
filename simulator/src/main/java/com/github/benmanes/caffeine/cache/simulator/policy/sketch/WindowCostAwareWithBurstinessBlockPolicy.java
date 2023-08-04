@@ -507,6 +507,9 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         private double missCosts = 0;
         private double burstBenefit = 0;
         private double totalBenefit = 0;
+        private double timeframeLruBenefit = 0;
+        private double timeframeLfuBenefit = 0;
+        private double timeframeBcBenefit = 0;
 
         public WindowCAWithBBStats(String format, Object... args) {
             super(format, args);
@@ -525,24 +528,28 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             ++this.windowHitCount;
             this.windowBenefit += missPenalty;
             this.totalBenefit += missPenalty;
+            this.timeframeLruBenefit += missPenalty;
         }
 
         final public void recordProtectedHit(double missPenalty) {
             ++this.protectedHitCount;
             this.protectedBenefit += missPenalty;
             this.totalBenefit += missPenalty;
+            this.timeframeLfuBenefit += missPenalty;
         }
 
         final public void recordProbationHit(double missPenalty) {
             ++this.probationHitCount;
             this.probationBenefit += missPenalty;
             this.totalBenefit += missPenalty;
+            this.timeframeLfuBenefit += missPenalty;
         }
 
         final public void recordBurstBlockHit(double missPenalty) {
             ++this.burstBlockHitCount;
             this.burstBenefit += missPenalty;
             this.totalBenefit += missPenalty;
+            this.timeframeBcBenefit += missPenalty;
         }
 
         public void recordMiss(double missPenalty) {
@@ -551,15 +558,15 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             this.totalBenefit += missPenalty;
         }
 
-        final protected double windowRate() {return (double) windowHitCount / requestCount();}
+        final protected double windowRate() { return (double) windowHitCount / requestCount(); }
 
-        final protected double protectedRate() {return (double) protectedHitCount / requestCount();}
+        final protected double protectedRate() { return (double) protectedHitCount / requestCount(); }
 
-        final protected double probationRate() {return (double) probationHitCount / requestCount();}
+        final protected double probationRate() { return (double) probationHitCount / requestCount(); }
 
-        final protected double burstBlockRate() {return (double) burstBlockHitCount / requestCount();}
+        final protected double burstBlockRate() { return (double) burstBlockHitCount / requestCount(); }
 
-        final public double windowBenefit() {return windowBenefit / totalBenefit;}
+        final public double windowBenefit()  {return windowBenefit / totalBenefit; }
 
         final public double protectedBenefit() {return protectedBenefit / totalBenefit;}
 
@@ -568,5 +575,23 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         final public double burstBenefit() {return burstBenefit / totalBenefit;}
 
         final public double missCost() {return missCosts / totalBenefit;}
+
+        public double timeframeLruBenefit() {
+            return timeframeLruBenefit;
+        }
+
+        public double timeframeLfuBenefit() {
+            return timeframeLfuBenefit;
+        }
+
+        public double timeframeBcBenefit() {
+            return timeframeBcBenefit;
+        }
+
+        public void resetTimeframeCounters() {
+            this.timeframeLruBenefit = 0;
+            this.timeframeLfuBenefit = 0;
+            this.timeframeBcBenefit = 0;
+        }
     }
 }

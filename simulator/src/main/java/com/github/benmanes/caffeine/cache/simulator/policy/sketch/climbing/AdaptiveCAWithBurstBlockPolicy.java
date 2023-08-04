@@ -10,6 +10,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.GhostHillClimb
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.ResizableWindowCostAwareWithBurstinessBlockPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.ResizableWindowCostAwareWithBurstinessBlockPolicy.BlockType;
 import com.google.common.base.Stopwatch;
+import com.google.errorprone.annotations.FormatMethod;
 import com.typesafe.config.Config;
 
 import java.io.FileWriter;
@@ -67,7 +68,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
             int quantumSize = (int) (settings.maximumSize() / quantaCount);
             this.adaptionTimeframe = (int) (settings.adaptionMultiplier() * settings.maximumSize());
 
-            stats = new AdaptiveCAWithBBStats("sketch.AdaptiveCAWithBB (LRU:%d, LFU: %d, BC:%d",
+            stats = new AdaptiveCAWithBBStats("sketch.FullGhostHillClimber (LRU:%d, LFU: %d, BC:%d)",
                                               windowQuota,
                                               protectedQuota + probationQuota,
                                               burstQuota);
@@ -221,25 +222,84 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
     private void adapt(int eventNum) {
         validateStats();
+        final var mainCacheTimeframeStats = this.mainCache.timeframeStats();
+        final double currLruBenefit = mainCacheTimeframeStats.timeframeLruBenefit();
+        final double currLfuBenefit = mainCacheTimeframeStats.timeframeLfuBenefit();
+        final double currBcBenefit = mainCacheTimeframeStats.timeframeBcBenefit();
 
         Adaption adaption = new Adaption(CacheConfiguration.MAIN,
                                          this.mainCache.timeframeStats().timeframeAveragePenalty());
 
         for (int i = 0; i < NUM_OF_POSSIBLE_CACHES; ++i) {
-            double avgPenalty = this.ghostCaches[i].timeframeStats().timeframeAveragePenalty();
+            final var ghostTimeframeStats = this.ghostCaches[i].timeframeStats();
+            final double avgPenalty = ghostTimeframeStats.timeframeAveragePenalty();
+            final CacheConfiguration currConf = CacheConfiguration.fromIndex(i);
 
             final int idx = i;
-            if (DEBUG) {
-                logger.log(Logger.Level.INFO, ConsoleColors.minorInfoString("%s: avg Pen. %.2f",
+            if (DEBUG && this.ghostCaches[i] != DUMMY) {
+
+                StringBuilder sb = new StringBuilder();
+                sb.append(currConf.name());
+                sb.append(':');
+                double expansionBenefit = 0;
+                double shrinkCost = 0;
+                switch (currConf.increment) {
+                    case LRU:
+                        expansionBenefit = ghostTimeframeStats.timeframeLruBenefit() - currLruBenefit;
+                        break;
+                    case LFU:
+                        expansionBenefit = ghostTimeframeStats.timeframeLfuBenefit() - currLfuBenefit;
+                        break;
+                    case BC:
+                        expansionBenefit = ghostTimeframeStats.timeframeBcBenefit() - currBcBenefit;
+                        break;
+                    case NONE:
+                    default:
+                        throw new IllegalStateException("Bad increment type");
+
+                }
+
+                switch (currConf.decrement) {
+                    case LRU:
+                        shrinkCost = currLruBenefit - ghostTimeframeStats.timeframeLruBenefit();
+                        break;
+                    case LFU:
+                        shrinkCost = currLfuBenefit - ghostTimeframeStats.timeframeLfuBenefit();
+                        break;
+                    case BC:
+                        shrinkCost = currBcBenefit - ghostTimeframeStats.timeframeBcBenefit();
+                        break;
+                    case NONE:
+                    default:
+                        throw new IllegalStateException("Bad decrement type");
+                }
+
+                sb.append('\t');
+                sb.append("EB inc: ");
+                sb.append(currConf.increment);
+                sb.append(": ");
+                sb.append(String.format("%.2e", expansionBenefit));
+                sb.append('\t');
+                sb.append("SC dec: ");
+                sb.append(currConf.decrement);
+                sb.append(": ");
+                sb.append(String.format("%.2e", shrinkCost));
+                logger.log(Logger.Level.INFO, ConsoleColors.minorInfoString("%s: avg Pen. %.2f, %s",
                                                                             CacheConfiguration.fromIndex(idx),
-                                                                            avgPenalty));
+                                                                            avgPenalty,
+                                                                            sb.toString()));
             }
 
             if (avgPenalty < adaption.avgPenalty()) {
-                adaption = new Adaption(CacheConfiguration.fromIndex(i), avgPenalty);
+                adaption = new Adaption(currConf, avgPenalty);
             }
 
             this.ghostCaches[i].resetStats();
+        }
+
+        if (DEBUG) {
+            logger.log(Logger.Level.DEBUG,
+                       ConsoleColors.colorString("===========================", ConsoleColors.YELLOW));
         }
 
         if (adaption.increment() != BlockType.NONE && adaption.decrement() != BlockType.NONE) {
@@ -368,7 +428,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
         @Override
         public String name() {
-            return mainStats.name();
+            return this.name;
         }
 
         @Override

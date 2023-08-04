@@ -332,6 +332,7 @@ public class ResizableWindowCostAwareWithBurstinessBlockPolicy extends WindowCos
             this.timeframeHitPenalty = 0;
             this.timeframeMissPenalty = 0;
             this.timeframeDelayedHitPenalty = 0;
+            super.resetTimeframeCounters();
         }
 
         @Override
