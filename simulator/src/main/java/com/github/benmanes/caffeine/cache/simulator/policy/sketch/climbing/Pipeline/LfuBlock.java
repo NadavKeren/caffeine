@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class LfuBlock implements PipelineBlock {
+    final static int GHOST_SIZE = 1;
     final private int quantumSize;
     final private Admittor admittor;
     final private CraBlock protectedBlock;
@@ -45,7 +46,7 @@ public class LfuBlock implements PipelineBlock {
             this.protectedBlock = new CraBlock(decayFactor, maxLists, 0, latencyEstimator, "protected");
         }
 
-        this.ghostBlock = new CraBlock(decayFactor, maxLists, quantumSize, latencyEstimator, "ghost");
+        this.ghostBlock = new CraBlock(decayFactor, maxLists, GHOST_SIZE * quantumSize, latencyEstimator, "ghost");
 
         this.capacity = quantumSize * initialQuota;
     }
@@ -227,6 +228,11 @@ public class LfuBlock implements PipelineBlock {
                                () -> String.format("Ghost block overflow: size: %d, capacity %d",
                                                    ghostBlock.size(),
                                                    ghostBlock.capacity()));
+    }
+
+    @Override
+    public boolean isGhostFull() {
+        return ghostBlock.size() >= ghostBlock.capacity();
     }
 
     @Override

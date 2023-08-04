@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class LruBlock implements PipelineBlock {
+    final static int GHOST_SIZE = 1;
     final private int quantumSize;
     final private CraBlock block;
     final private CraBlock endBlock;
@@ -36,7 +37,7 @@ public class LruBlock implements PipelineBlock {
 
         this.block = new CraBlock(decayFactor, maxLists, sizeBlock, latencyEstimator, "LRU-Block");
         this.endBlock = new CraBlock(decayFactor, maxLists, sizeEndBlock, latencyEstimator, "LRU-End-of-Block");
-        this.ghostBlock = new CraBlock(decayFactor, maxLists, quantumSize, latencyEstimator, "LRU-Ghost");
+        this.ghostBlock = new CraBlock(decayFactor, maxLists, GHOST_SIZE * quantumSize, latencyEstimator, "LRU-Ghost");
     }
 
     @Override
@@ -173,8 +174,8 @@ public class LruBlock implements PipelineBlock {
                         block.capacity(),
                         endBlock.capacity()));
 
-        Assert.assertCondition(ghostBlock.capacity() == quantumSize,
-                () -> String.format("Illegal ghost block capacity: %d", ghostBlock.capacity()));
+//        Assert.assertCondition(ghostBlock.capacity() == 2 * quantumSize,
+//                () -> String.format("Illegal ghost block capacity: %d", ghostBlock.capacity()));
 
         Assert.assertCondition(endBlock.size() <= endBlock.capacity(),
                 () -> String.format("End-of-block overflow: size: %d, capacity: %d", endBlock.size(), endBlock.capacity()));
@@ -184,6 +185,11 @@ public class LruBlock implements PipelineBlock {
 
         Assert.assertCondition(ghostBlock.size() <= ghostBlock.capacity(),
                 () -> String.format("Ghost Block overflow: size: %d, capacity: %d", ghostBlock.size(), ghostBlock.capacity()));
+    }
+
+    @Override
+    public boolean isGhostFull() {
+        return ghostBlock.size() >= ghostBlock.capacity();
     }
 
     @Override

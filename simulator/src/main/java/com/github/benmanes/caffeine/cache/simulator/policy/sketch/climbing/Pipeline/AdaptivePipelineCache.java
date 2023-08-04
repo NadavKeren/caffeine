@@ -25,8 +25,6 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.lang.System.Logger;
 
@@ -175,7 +173,7 @@ public class AdaptivePipelineCache implements Policy {
 
         ++opsSinceAdaption;
 
-        if (opsSinceAdaption >= adaptionTimeframe && size() >= cacheCapacity) {
+        if (opsSinceAdaption >= adaptionTimeframe && size() >= cacheCapacity) { //) && areGhostsFull()) {
             opsSinceAdaption = 0;
             adapt(event.eventNum());
         }
@@ -233,40 +231,57 @@ public class AdaptivePipelineCache implements Policy {
 
         for (int idx = 0; idx < blockCount; ++idx) {
 
-            double currentBenefit = blockQuotas[idx] < totalQuota ? blocks[idx].getExpansionBenefit() : 0;
-            double currentCost = blockQuotas[idx] > 0 ? blocks[idx].getShrinkCost() : Double.MAX_VALUE;
+            final double currentBenefit = blockQuotas[idx] < totalQuota ? blocks[idx].getExpansionBenefit() : 0;
+            final double currentCost = blockQuotas[idx] > 0 ? blocks[idx].getShrinkCost() : Double.MAX_VALUE;
+            final double currCapacity = Math.max(blockQuotas[idx] * quantumSize, 1);
 
             sortedByExpansionBenefit.add(new DoubleIntImmutablePair(currentBenefit, idx));
-            sortedByShrinkCost.add(new DoubleIntImmutablePair(currentCost, idx));
+            sortedByShrinkCost.add(new DoubleIntImmutablePair(currentCost / currCapacity, idx));
 
 
             if (DEBUG) {
-                logger.log(Logger.Level.INFO, ConsoleColors.minorInfoString("%s: EB: %.2f SC: %.2f", this.types[idx], currentBenefit, currentCost));
+                if (blockQuotas[idx] == totalQuota) {
+                    logger.log(Logger.Level.INFO,
+                               ConsoleColors.minorInfoString("%s: EB: N/A SC: %.2e",
+                                                             this.types[idx],
+                                                             currentCost));
+                } else if (blockQuotas[idx] == 0) {
+                    logger.log(Logger.Level.INFO,
+                               ConsoleColors.minorInfoString("%s: EB: %.2e SC: N/A",
+                                                             this.types[idx],
+                                                             currentBenefit));
+                } else {
+                    logger.log(Logger.Level.INFO,
+                               ConsoleColors.minorInfoString("%s: EB: %.2e SC: %.2e",
+                                                             this.types[idx],
+                                                             currentBenefit,
+                                                             currentCost));
+                }
             }
         }
-
-        Collections.sort(sortedByExpansionBenefit, Comparator.comparingInt(Pair::right));
-        Collections.sort(sortedByShrinkCost, (l1, l2) -> (l2.right() - l1.right()));
+        if (DEBUG) {
+            logger.log(Logger.Level.DEBUG,
+                       ConsoleColors.colorString("===========================", ConsoleColors.YELLOW));
+        }
 
         int incIdx = 0;
         int decIdx = 0;
-        boolean wasFound = false;
+        double diff = 0;
 
-        for (int i = 0; i < blockCount && !wasFound; ++i) {
-            for (int j = 0; j < blockCount && !wasFound; ++j) {
-                var currMaxExp = sortedByExpansionBenefit.get(i);
-                var currMinCost = sortedByShrinkCost.get(j);
-                if (!currMaxExp.right().equals(currMinCost.right())
-                    && currMaxExp.left().compareTo(currMinCost.left()) > 0) {
-                    incIdx = currMaxExp.right();
-                    decIdx = currMinCost.right();
-                    wasFound = true;
+        for (Pair<Double, Integer> expansionPair : sortedByExpansionBenefit) {
+            for (Pair<Double, Integer> shrinkPair : sortedByShrinkCost) {
+                if (!expansionPair.right().equals(shrinkPair.right())) {
+                    double currDiff = expansionPair.first() - shrinkPair.first();
+                    if (currDiff > diff) {
+                        incIdx = expansionPair.right();
+                        decIdx = shrinkPair.right();
+                        diff = currDiff;
+                    }
                 }
             }
         }
 
-
-        if (wasFound) {
+        if (diff > 0) {
             if (DEBUG) {
                 logger.log(Logger.Level.INFO, ConsoleColors.infoString("max difference at: %s and %s", types[incIdx], types[decIdx]));
             }

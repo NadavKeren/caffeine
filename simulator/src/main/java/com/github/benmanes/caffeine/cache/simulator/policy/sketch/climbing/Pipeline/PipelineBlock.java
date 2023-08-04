@@ -20,6 +20,8 @@ public interface PipelineBlock {
 
     void validate();
 
+    boolean isGhostFull();
+
     double getExpansionBenefit();
     double getShrinkCost();
     void resetStats();
