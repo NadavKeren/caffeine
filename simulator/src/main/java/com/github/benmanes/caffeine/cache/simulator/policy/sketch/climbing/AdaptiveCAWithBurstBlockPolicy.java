@@ -10,7 +10,6 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.GhostHillClimb
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.ResizableWindowCostAwareWithBurstinessBlockPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.ResizableWindowCostAwareWithBurstinessBlockPolicy.BlockType;
 import com.google.common.base.Stopwatch;
-import com.google.errorprone.annotations.FormatMethod;
 import com.typesafe.config.Config;
 
 import java.io.FileWriter;

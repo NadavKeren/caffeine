@@ -30,6 +30,7 @@ import java.lang.System.Logger;
 
 @Policy.PolicySpec(name = "sketch.AdaptivePipeline")
 public class AdaptivePipelineCache implements Policy {
+    private final static int MINIMUM_QUOTA = 1;
     private static boolean DEBUG = true;
 
     private static Logger logger = DEBUG ? System.getLogger(AdaptivePipelineCache.class.getName()) : null;
@@ -76,13 +77,16 @@ public class AdaptivePipelineCache implements Policy {
                                                                   settings.ageSmoothFactor(),
                                                                   settings.numOfPartitions());
 
+        final int ghostSize = settings.ghostSize();
+
         for (int idx = 0; idx < blockCount; ++idx) {
             final Config currConfig = blockConfigs.get(idx);
             final PipelineBlockSettings blockSettings = new PipelineBlockSettings(currConfig);
             final int quota = blockSettings.quota();
             final String type = blockSettings.type();
 
-            blocks[idx] = createBlock(type, quota, config, currConfig);
+
+            blocks[idx] = createBlock(type, quota, ghostSize, config, currConfig);
             blockQuotas[idx] = quota;
             types[idx] = type;
         }
@@ -129,21 +133,25 @@ public class AdaptivePipelineCache implements Policy {
         return nameBuilder.toString();
     }
 
-    private PipelineBlock createBlock(String type, int quota, Config generalConfig, Config blockConfig) {
+    private PipelineBlock createBlock(String type, int quota, int ghostSize, Config generalConfig, Config blockConfig) {
         PipelineBlock block = null;
 
         switch (type) {
             case "LRU":
                 block = new LruBlock(blockConfig,
-                        new UneditableLatencyEstimatorProxy<>(latencyEstimator),
-                        quantumSize,
-                        quota);
+                                     new UneditableLatencyEstimatorProxy<>(latencyEstimator),
+                                     quantumSize,
+                                     quota,
+                                     ghostSize);
                 break;
             case "BC":
-                block = new BurstCache(new UneditableLatencyEstimatorProxy<>(burstEstimator), quantumSize, quota);
+                block = new BurstCache(new UneditableLatencyEstimatorProxy<>(burstEstimator),
+                                       quantumSize,
+                                       quota,
+                                       ghostSize);
                 break;
             case "LFU":
-                block = new LfuBlock(generalConfig, blockConfig, latencyEstimator, quantumSize, quota);
+                block = new LfuBlock(generalConfig, blockConfig, latencyEstimator, quantumSize, quota, ghostSize);
                 break;
             default:
                 throw new IllegalStateException("No such type: " + type);
@@ -231,12 +239,19 @@ public class AdaptivePipelineCache implements Policy {
 
         for (int idx = 0; idx < blockCount; ++idx) {
 
-            final double currentBenefit = blockQuotas[idx] < totalQuota ? blocks[idx].getExpansionBenefit() : 0;
-            final double currentCost = blockQuotas[idx] > 0 ? blocks[idx].getShrinkCost() : Double.MAX_VALUE;
-            final double currCapacity = Math.max(blockQuotas[idx] * quantumSize, 1);
+            final double currentBenefit = blockQuotas[idx] < totalQuota ?  blocks[idx].getExpansionBenefit(): 0;
+//            final double currentCost = blockQuotas[idx] > 0 ? blocks[idx].getShrinkCost() : Double.MAX_VALUE;
+            double currentCost = blockQuotas[idx] > MINIMUM_QUOTA ? blocks[idx].getShrinkCost() : Double.MAX_VALUE;
+            final int currCapacity = Math.max(blockQuotas[idx] * quantumSize, 1);
+            currentCost /= currCapacity;
 
-            sortedByExpansionBenefit.add(new DoubleIntImmutablePair(currentBenefit, idx));
-            sortedByShrinkCost.add(new DoubleIntImmutablePair(currentCost / currCapacity, idx));
+            if (blockQuotas[idx] < totalQuota) {
+                sortedByExpansionBenefit.add(new DoubleIntImmutablePair(currentBenefit, idx));
+            }
+
+            if (blockQuotas[idx] > MINIMUM_QUOTA) {
+                sortedByShrinkCost.add(new DoubleIntImmutablePair(currentCost, idx));
+            }
 
 
             if (DEBUG) {
@@ -410,6 +425,8 @@ public class AdaptivePipelineCache implements Policy {
         public double ageSmoothFactor() {return config().getDouble(BASE_PATH + ".burst.age-smoothing");}
 
         public int numOfPartitions() {return config().getInt(BASE_PATH + ".burst.number-of-partitions");}
+
+        public int ghostSize() { return config().getInt(BASE_PATH + ".ghost-size"); }
 
         public List<Config> blocksConfigs() {
             final int numOfBlocks = numOfBlocks();

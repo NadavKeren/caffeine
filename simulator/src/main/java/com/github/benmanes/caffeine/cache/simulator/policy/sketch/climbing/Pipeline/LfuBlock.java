@@ -15,7 +15,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class LfuBlock implements PipelineBlock {
-    final static int GHOST_SIZE = 1;
     final private int quantumSize;
     final private Admittor admittor;
     final private CraBlock protectedBlock;
@@ -26,7 +25,12 @@ public class LfuBlock implements PipelineBlock {
     private double expansionBenefit = 0;
     private double shrinkCost = 0;
 
-    public LfuBlock(Config config, Config blockConfig, LatencyEstimator<Long> latencyEstimator, int quantumSize, int initialQuota) {
+    public LfuBlock(Config config,
+                    Config blockConfig,
+                    LatencyEstimator<Long> latencyEstimator,
+                    int quantumSize,
+                    int initialQuota,
+                    int ghostSize) {
         this.quantumSize = quantumSize;
         var settings = new LfuBlockSettings(blockConfig);
         final double decayFactor = settings.decayFactor();
@@ -46,7 +50,7 @@ public class LfuBlock implements PipelineBlock {
             this.protectedBlock = new CraBlock(decayFactor, maxLists, 0, latencyEstimator, "protected");
         }
 
-        this.ghostBlock = new CraBlock(decayFactor, maxLists, GHOST_SIZE * quantumSize, latencyEstimator, "ghost");
+        this.ghostBlock = new CraBlock(decayFactor, maxLists, ghostSize * quantumSize, latencyEstimator, "ghost");
 
         this.capacity = quantumSize * initialQuota;
     }

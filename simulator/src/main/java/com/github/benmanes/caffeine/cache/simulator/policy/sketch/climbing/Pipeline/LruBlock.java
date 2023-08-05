@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class LruBlock implements PipelineBlock {
-    final static int GHOST_SIZE = 1;
     final private int quantumSize;
     final private CraBlock block;
     final private CraBlock endBlock;
@@ -21,7 +20,7 @@ public class LruBlock implements PipelineBlock {
     private double expansionBenefit = 0;
     private double shrinkCost = 0;
 
-    public LruBlock(Config config, LatencyEstimator<Long> latencyEstimator, int quantumSize, int initialQuota) {
+    public LruBlock(Config config, LatencyEstimator<Long> latencyEstimator, int quantumSize, int initialQuota, int ghostSize) {
         this.quantumSize = quantumSize;
 
         var settings = new LruBlockSettings(config);
@@ -37,7 +36,7 @@ public class LruBlock implements PipelineBlock {
 
         this.block = new CraBlock(decayFactor, maxLists, sizeBlock, latencyEstimator, "LRU-Block");
         this.endBlock = new CraBlock(decayFactor, maxLists, sizeEndBlock, latencyEstimator, "LRU-End-of-Block");
-        this.ghostBlock = new CraBlock(decayFactor, maxLists, GHOST_SIZE * quantumSize, latencyEstimator, "LRU-Ghost");
+        this.ghostBlock = new CraBlock(decayFactor, maxLists, ghostSize * quantumSize, latencyEstimator, "LRU-Ghost");
     }
 
     @Override

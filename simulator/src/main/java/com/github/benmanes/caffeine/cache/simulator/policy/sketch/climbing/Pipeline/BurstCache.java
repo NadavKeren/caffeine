@@ -8,7 +8,6 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 public class BurstCache implements PipelineBlock {
-    final static int GHOST_SIZE = 1;
     final private int quantumSize;
     final private BurstBlock block;
     final private BurstBlock ghostBlock;
@@ -16,11 +15,11 @@ public class BurstCache implements PipelineBlock {
     private double expansionBenefit = 0;
     private double shrinkCost = 0;
 
-    public BurstCache(LatencyEstimator<Long> burstEstimator, int quantumSize, int initialQuota) {
+    public BurstCache(LatencyEstimator<Long> burstEstimator, int quantumSize, int initialQuota, int ghostSize) {
         this.quantumSize = quantumSize;
 
         block = new BurstBlock(initialQuota * quantumSize, burstEstimator);
-        ghostBlock = new BurstBlock(quantumSize * GHOST_SIZE, burstEstimator);
+        ghostBlock = new BurstBlock(quantumSize * ghostSize, burstEstimator);
     }
 
     @Override
