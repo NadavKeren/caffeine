@@ -39,19 +39,21 @@ public abstract class AbstractLAClimber implements LAHillClimber {
   public void onMiss(AccessEvent event, boolean isFull) {
     if (isFull) {
       sampleCount++;
-      penaltiesInSample += event.missPenalty();
+      double penalty = event.getStatus() == AccessEvent.EventStatus.HIT ? event.hitPenalty() : event.delayedHitPenalty();
+      penaltiesInSample += penalty;
     }
   }
 
   @Override
   public void onHit(AccessEvent event, QueueType queueType, boolean isFull) {
+    double penalty = event.getStatus() == AccessEvent.EventStatus.HIT ? event.hitPenalty() : event.delayedHitPenalty();
     if (isFull) {
       sampleCount++;
-      penaltiesInSample += event.hitPenalty();
+      penaltiesInSample += penalty;
       if (queueType == QueueType.WINDOW) {
-        penaltiesInWindow += event.hitPenalty();
+        penaltiesInWindow += penalty;
       } else {
-        penaltiesInMain += event.hitPenalty();
+        penaltiesInMain += penalty;
       }
     }
   }

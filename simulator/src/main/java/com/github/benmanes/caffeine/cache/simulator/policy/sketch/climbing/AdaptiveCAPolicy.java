@@ -64,7 +64,7 @@ public final class AdaptiveCAPolicy implements Policy {
   private final CraBlock protectedBlock;
   private final CraBlock windowBlock;
 
-  private final List<Double> windowCapacityHistory;
+  private final List<DumpEntry> dumpInfo;
 
   private int windowCapacity;
   private int protectedCapacity;
@@ -79,6 +79,11 @@ public final class AdaptiveCAPolicy implements Policy {
   private int maxDeltaCounts;
   private int samplesCount;
 
+  private double timeframePenalty;
+  private int timeframeHitCount;
+  private int timeframeOpCount;
+
+
 
   public AdaptiveCAPolicy(
           LAHillClimberType strategy, double percentMain, AdaptiveCASettings settings,
@@ -91,8 +96,8 @@ public final class AdaptiveCAPolicy implements Policy {
     this.protectedBlock = new CraBlock(decayFactor, maxLists, this.protectedCapacity, latencyEstimator, "protected-block");
     this.probationBlock = new CraBlock(decayFactor, maxLists, mainCacheCapacity - this.protectedCapacity, latencyEstimator, "probation-block");
     this.windowBlock = new CraBlock(decayFactor, maxLists, this.windowCapacity, latencyEstimator, "window-block");
-    this.windowCapacityHistory = new ArrayList<>();
-    this.windowCapacityHistory.add((double) 100 * this.windowCapacity / this.cacheCapacity);
+    this.dumpInfo = new ArrayList<>();
+    this.dumpInfo.add(new DumpEntry(0, 1 - (double) this.windowCapacity / this.cacheCapacity, 1, 0));
     this.initialPercentMain = percentMain;
     this.policyStats = new PolicyStats("CAHillClimberWindow (%s)(k=%.2f,maxLists=%d)",
                                        strategy.name().toLowerCase(US), decayFactor, maxLists);
@@ -104,7 +109,15 @@ public final class AdaptiveCAPolicy implements Policy {
     this.maxDeltaCounts = 0;
     this.samplesCount = 0;
 
+    resetTimeFrameCounters();
+
     printSegmentSizes();
+  }
+
+  private void resetTimeFrameCounters() {
+    this.timeframePenalty = 0;
+    this.timeframeHitCount = 0;
+    this.timeframeOpCount = 0;
   }
 
   private LatencyEstimator<Long> createEstimator(Config config) {
@@ -186,6 +199,8 @@ public final class AdaptiveCAPolicy implements Policy {
        recordAccordingToAvailability(entry, event);
     }
 
+    ++timeframeOpCount;
+
     final boolean isFull = (size() >= cacheCapacity);
     climb(event, queue, isFull);
   }
@@ -198,12 +213,17 @@ public final class AdaptiveCAPolicy implements Policy {
       policyStats.recordHitPenalty(currEvent.hitPenalty());
 
       latencyEstimator.recordHit(currEvent.hitPenalty());
+
+      timeframePenalty += currEvent.hitPenalty();
+      ++timeframeHitCount;
     } else {
       currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
       currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());
       policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
       policyStats.recordDelayedHit();
       latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
+
+      timeframePenalty += currEvent.delayedHitPenalty();
     }
   }
 
@@ -236,6 +256,8 @@ public final class AdaptiveCAPolicy implements Policy {
    * Adds the entry to the admission window, evicting if necessary.
    */
   private void onMiss(AccessEvent event) {
+    event.changeEventStatus(AccessEvent.EventStatus.MISS);
+    timeframePenalty += event.missPenalty();
     windowBlock.addEntry(event);
     windowSize++;
     evict();
@@ -319,7 +341,12 @@ public final class AdaptiveCAPolicy implements Policy {
     }
 
     if (adaptation.type != AdaptationType.HOLD) {
-      this.windowCapacityHistory.add((double) this.windowCapacity / this.cacheCapacity);
+      DumpEntry dumpEntry = new DumpEntry(event.eventNum(),
+                                          1 - (double) this.windowCapacity / this.cacheCapacity,
+                                          (double) timeframeHitCount / timeframeOpCount,
+                                          timeframePenalty / timeframeOpCount);
+      resetTimeFrameCounters();
+      this.dumpInfo.add(dumpEntry);
     }
   }
 
@@ -404,8 +431,8 @@ public final class AdaptiveCAPolicy implements Policy {
     if (DUMP) {
       PrintWriter writer = prepareFileWriter();
 
-      for (double windowCapacity: windowCapacityHistory) {
-        writer.printf("%.2f,%.2f%n", windowCapacity, 100 - windowCapacity);
+      for (var dumpEntry : dumpInfo) {
+        writer.println(dumpEntry);
       }
 
       writer.close();
@@ -460,5 +487,29 @@ public final class AdaptiveCAPolicy implements Policy {
       return config().getInt("ca-hill-climber-window.cra.max-lists");
     }
 
+  }
+  
+  private static final class DumpEntry {
+    private int eventNum;
+    private double mainPercentage;
+    private double hitRate;
+    private double avgPenalty;
+
+    private DumpEntry(int eventNum, double mainPercentage, double hitRate, double avgPenalty) {
+      this.eventNum = eventNum;
+      this.mainPercentage = mainPercentage;
+      this.hitRate = hitRate;
+      this.avgPenalty = avgPenalty;
+    }
+
+    @Override
+    public String toString() {
+      return String.format("%d,%.1f,%.1f,%.1f,%.1f",
+                           eventNum,
+                           (1 - mainPercentage) * 100,
+                           mainPercentage * 100,
+                           100 * hitRate,
+                           avgPenalty);
+    }
   }
 }
