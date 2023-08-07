@@ -186,7 +186,8 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
         Assert.assertCondition((hitPenaltyAfter > hitPenaltyBefore && delayedHitPenaltyAfter == delayedHitPenaltyBefore && missPenaltyAfter == missPenaltyBefore)
                                || (hitPenaltyAfter == hitPenaltyBefore && delayedHitPenaltyAfter > delayedHitPenaltyBefore && missPenaltyAfter == missPenaltyBefore)
-                               || (hitPenaltyAfter == hitPenaltyBefore && delayedHitPenaltyAfter == delayedHitPenaltyBefore && missPenaltyAfter > missPenaltyBefore),
+                               || (hitPenaltyAfter == hitPenaltyBefore && delayedHitPenaltyAfter == delayedHitPenaltyBefore && missPenaltyAfter > missPenaltyBefore)
+                               || event.hitPenalty() == 0,
                                () -> String.format("No stats update: Before: %.2f %.2f %.2f After: %.2f %.2f %.2f",
                                                    hitPenaltyBefore,
                                                    delayedHitPenaltyBefore,

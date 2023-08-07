@@ -395,7 +395,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                                    && missPenaltyAfter == missPenaltyBefore)
                                || (hitPenaltyAfter == hitPenaltyBefore
                                    && delayedHitPenaltyAfter == delayedHitPenaltyBefore
-                                   && missPenaltyAfter > missPenaltyBefore),
+                                   && missPenaltyAfter > missPenaltyBefore) || event.hitPenalty() == 0,
                                () -> String.format("No stats update: Before: %.2f %.2f %.2f After: %.2f %.2f %.2f",
                                                    hitPenaltyBefore,
                                                    delayedHitPenaltyBefore,
