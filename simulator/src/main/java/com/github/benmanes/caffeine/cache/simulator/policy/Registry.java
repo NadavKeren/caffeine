@@ -32,6 +32,7 @@ import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy.Characteristic;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy.PolicySpec;
 import com.github.benmanes.caffeine.cache.simulator.policy.adaptive.ArcPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.adaptive.CostAwareArcPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.adaptive.CarPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.adaptive.CartPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.greedy_dual.CampPolicy;
@@ -61,6 +62,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.product.GuavaPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.product.HazelcastPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.product.OhcPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.product.TCachePolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sampled.HyperbolicPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sampled.SampledPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.GhostHillClimberTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowCostAwareWithBurstinessBlockPolicy;
@@ -175,6 +177,7 @@ public final class Registry {
       registerMany(priority.label(), SampledPolicy.class,
           config -> SampledPolicy.policies(config, priority));
     });
+    registerMany(HyperbolicPolicy.class, HyperbolicPolicy::policies);
   }
 
   private void registerTwoQueue() {
@@ -225,6 +228,7 @@ public final class Registry {
     register(ArcPolicy.class, ArcPolicy::new);
     register(CarPolicy.class, CarPolicy::new);
     register(CartPolicy.class, CartPolicy::new);
+    register(CostAwareArcPolicy.class, CostAwareArcPolicy::new);
   }
 
   private void registerGreedyDual() {
