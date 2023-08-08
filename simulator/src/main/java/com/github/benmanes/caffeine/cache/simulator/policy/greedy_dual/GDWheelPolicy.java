@@ -75,11 +75,25 @@ public final class GDWheelPolicy implements Policy {
     policyStats.recordOperation();
     if (node == null) {
       policyStats.recordWeightedMiss(event.weight());
-      node = new Node(event.key());
+      policyStats.recordMissPenalty(event.missPenalty());
+      node = new Node(event.key(), event);
       onMiss(event, node);
     } else {
       policyStats.recordWeightedHit(event.weight());
       onHit(event, node);
+      recordAccordingToAvailability(node.event, event);
+    }
+  }
+
+  private void recordAccordingToAvailability(AccessEvent entryEvent, AccessEvent currEvent) {
+    boolean isAvailable = entryEvent.isAvailableAt(currEvent.getArrivalTime());
+    if (isAvailable) {
+      currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
+      policyStats.recordHitPenalty(currEvent.hitPenalty());
+    } else {
+      currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+      currEvent.setDelayedHitPenalty(entryEvent.getAvailabilityTime());
+      policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
     }
   }
 
@@ -213,7 +227,7 @@ public final class GDWheelPolicy implements Policy {
     final int queueIndex;
 
     public Sentinel(int wheelIndex, int queueIndex) {
-      super(Long.MIN_VALUE);
+      super(Long.MIN_VALUE, null);
       this.wheelIndex = wheelIndex;
       this.queueIndex = queueIndex;
       prev = next = this;
@@ -246,12 +260,15 @@ public final class GDWheelPolicy implements Policy {
 
     double cost;
     int weight;
+    AccessEvent event;
 
     Node prev;
     Node next;
 
-    public Node(long key) {
+    public Node(long key, AccessEvent event) {
+
       this.key = key;
+      this.event = event;
     }
 
     /** Removes the node from the list. */
