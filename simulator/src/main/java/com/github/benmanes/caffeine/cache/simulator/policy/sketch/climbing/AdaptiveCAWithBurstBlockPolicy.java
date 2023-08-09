@@ -37,6 +37,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
     final private int adaptionTimeframe;
     private int opsSinceAdaption;
     private int adaptionNumber = 0;
+    final private boolean allowBC;
     private List<CacheState> capacityHistory;
 
     private final ResizableWindowCostAwareWithBurstinessBlockPolicy[] ghostCaches;
@@ -51,6 +52,9 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
             int probationQuota = settings.probationQuota();
             int burstQuota = settings.bcQuota();
             int quantaCount = settings.numOfQuanta();
+            this.allowBC = settings.allowBC();
+
+            Assert.assertCondition(allowBC || burstQuota == 0, "Cannot have BC quota when not allowing BC");
 
 
             Assert.assertCondition(windowQuota >= 0 && probationQuota >= 0 && protectedQuota >= 0 && burstQuota >= 0,
@@ -155,7 +159,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
     }
 
     private void setGhostCache(int i, BlockType increase, BlockType decrease, String name) {
-        if (checkIfChangePossible(increase, decrease)) {
+        if ((allowBC || !CacheConfiguration.isContainingBC(i)) && checkIfChangePossible(increase, decrease)) {
             this.ghostCaches[i] = mainCache.createGhostCopy(name);
             this.ghostCaches[i].changeSizes(increase, decrease);
         } else {
@@ -578,6 +582,8 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         public double adaptionMultiplier() {
             return config().getDouble(BASE_PATH + ".adaption-multiplier");
         }
+
+        public boolean allowBC() { return config().getBoolean(BASE_PATH + ".allow-bc"); }
     }
 
     private static class Adaption {
@@ -621,6 +627,10 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
             this.name = name;
             this.increment = increment;
             this.decrement = decrement;
+        }
+
+        public static boolean isContainingBC(int idx) {
+            return idx != 1 && idx != 3;
         }
 
         @SuppressWarnings("unused")
