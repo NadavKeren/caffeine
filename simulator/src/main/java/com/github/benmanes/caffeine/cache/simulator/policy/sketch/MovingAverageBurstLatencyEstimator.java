@@ -76,14 +76,15 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
 
     @Override
     public double getLatencyEstimation(KeyType key) {
-        return storedValues.get(key).getValue();
+        var entry = storedValues.get(key);
+        return entry != null ? entry.getValue() : 0;
     }
 
     @Override
     public double getLatencyEstimation(KeyType key, double time) {
         Entry entry = storedValues.get(key);
         if (entry == null) {
-            throw new IllegalArgumentException(String.format("Key %s was not present during update attempt", key));
+            return 0;
         }
 
         return entry.getValue(time);

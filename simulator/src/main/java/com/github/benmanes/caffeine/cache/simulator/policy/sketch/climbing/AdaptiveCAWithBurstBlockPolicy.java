@@ -38,6 +38,10 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
     private int opsSinceAdaption;
     private int adaptionNumber = 0;
     final private boolean allowBC;
+
+    private double timeframePenalty = 0;
+    private int timeframeOpCount = 0;
+    private int timeframeHitCount = 0;
     private List<CacheState> capacityHistory;
 
     private final ResizableWindowCostAwareWithBurstinessBlockPolicy[] ghostCaches;
@@ -89,7 +93,8 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
             ghostCaches = new ResizableWindowCostAwareWithBurstinessBlockPolicy[NUM_OF_POSSIBLE_CACHES];
             createGhostCaches();
 
-            currCapacityState = new CacheState(this, 0, windowQuota, probationQuota + protectedQuota, burstQuota);
+            currCapacityState = new CacheState(0, windowQuota, probationQuota + protectedQuota, burstQuota,
+                                               100, 0);
             capacityHistory = new ArrayList<>();
             capacityHistory.add(currCapacityState);
 
@@ -173,6 +178,23 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         final double delayedHitPenaltyBefore = stats().delayedHitPenalty();
         final double missPenaltyBefore = stats().missPenalty();
         this.mainCache.record(event);
+
+        switch (event.getStatus()) {
+            case HIT:
+                this.timeframeHitCount++;
+                this.timeframeOpCount++;
+                this.timeframePenalty += event.hitPenalty();
+                break;
+            case DELAYED_HIT:
+                this.timeframeOpCount++;
+                this.timeframePenalty += event.delayedHitPenalty();
+                break;
+            case MISS:
+                this.timeframeOpCount++;
+                this.timeframePenalty += event.missPenalty();
+                break;
+        }
+
         for (int i = 0; i < NUM_OF_POSSIBLE_CACHES; ++i) {
             this.ghostCaches[i].record(event);
         }
@@ -318,16 +340,16 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                                                                             this.stats.averagePenalty()));
             }
 
-            var newCapacityState = CacheState.fromStateAndAdaptation(this,
-                                                                     eventNum,
+            var newCapacityState = CacheState.fromStateAndAdaptation(eventNum,
                                                                      currCapacityState,
-                                                                     adaption);
+                                                                     adaption,
+                                                                     (double) timeframeHitCount / timeframeOpCount,
+                                                                     timeframePenalty / timeframeOpCount);
 
             capacityHistory.add(newCapacityState);
             currCapacityState = newCapacityState;
 
             this.mainCache.changeSizes(adaption.increment(), adaption.decrement());
-            this.mainCache.resetTimeframeStats();
 
             if (DEBUG) {
                 logger.log(Logger.Level.INFO,
@@ -341,15 +363,21 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
 
             createGhostCaches();
         } else {
-            var newCapacityState = new CacheState(this,
-                                                  eventNum,
+            var newCapacityState = new CacheState(eventNum,
                                                   currCapacityState.lruCapacity,
                                                   currCapacityState.lfuCapacity,
-                                                  currCapacityState.bcCapacity);
+                                                  currCapacityState.bcCapacity,
+                                                  (double) timeframeHitCount / timeframeOpCount,
+                                                  timeframePenalty / timeframeOpCount);
 
             capacityHistory.add(newCapacityState);
             currCapacityState = newCapacityState;
         }
+
+        this.mainCache.resetTimeframeStats();
+        timeframeOpCount = 0;
+        timeframePenalty = 0;
+        timeframeHitCount = 0;
 
         ++this.adaptionNumber;
     }
@@ -399,6 +427,10 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
     @Override
     public PolicyStats stats() {
         return stats;
+    }
+
+    protected ResizableWindowCostAwareWithBurstinessBlockPolicy.ResettableWCWithBBStats timeframeStats() {
+        return mainCache.timeframeStats();
     }
 
     @Override
@@ -671,26 +703,28 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         final private int lruCapacity;
         final private int lfuCapacity;
         final private int bcCapacity;
-        final private double hitRate;
-        final private double avgPenalty;
+        final private double timeframeHitRate;
+        final private double timeframeAvgPenalty;
 
-        private CacheState(AdaptiveCAWithBurstBlockPolicy policy,
-                           int eventNum,
+        private CacheState(int eventNum,
                            int lruCapacity,
                            int lfuCapacity,
-                           int bcCapacity) {
+                           int bcCapacity,
+                           double timeframeHitRate,
+                           double timeframeAvgPenalty) {
             this.eventNum = eventNum;
             this.lruCapacity = lruCapacity;
             this.lfuCapacity = lfuCapacity;
             this.bcCapacity = bcCapacity;
-            this.hitRate = policy.stats.hitRate();
-            this.avgPenalty = policy.stats.averagePenalty();
+            this.timeframeHitRate = timeframeHitRate;
+            this.timeframeAvgPenalty = timeframeAvgPenalty;
         }
 
-        protected static CacheState fromStateAndAdaptation(AdaptiveCAWithBurstBlockPolicy policy,
-                                                    int eventNum,
-                                                    CacheState state,
-                                                    Adaption adaption) {
+        protected static CacheState fromStateAndAdaptation(int eventNum,
+                                                           CacheState state,
+                                                           Adaption adaption,
+                                                           double timeframeHitRate,
+                                                           double timeframeAvgPenalty) {
             int currentLRU = state.lruCapacity();
             int currentLFU = state.lfuCapacity();
             int currentBC = state.bcCapacity();
@@ -725,7 +759,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                     throw new IllegalStateException("Bad adaption");
             }
 
-            return new CacheState(policy, eventNum, currentLRU, currentLFU, currentBC);
+            return new CacheState(eventNum, currentLRU, currentLFU, currentBC, timeframeHitRate, timeframeAvgPenalty);
         }
 
         private int lruCapacity() {
@@ -747,8 +781,8 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                                  lruCapacity,
                                  lfuCapacity,
                                  bcCapacity,
-                                 hitRate * 100,
-                                 avgPenalty);
+                                 timeframeHitRate * 100,
+                                 timeframeAvgPenalty);
         }
     }
 }
