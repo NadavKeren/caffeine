@@ -1,9 +1,10 @@
-package com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.Pipeline;
+package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
 import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
 import com.github.benmanes.caffeine.cache.simulator.admission.LATinyLfu;
+import com.github.benmanes.caffeine.cache.simulator.admission.UneditableAdmittorProxy;
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
@@ -19,18 +20,13 @@ public class LfuBlock implements PipelineBlock {
     final private Admittor admittor;
     final private CraBlock protectedBlock;
     final private CraBlock probationBlock;
-    final private CraBlock ghostBlock;
     private int capacity;
-
-    private double expansionBenefit = 0;
-    private double shrinkCost = 0;
 
     public LfuBlock(Config config,
                     Config blockConfig,
                     LatencyEstimator<Long> latencyEstimator,
                     int quantumSize,
-                    int initialQuota,
-                    int ghostSize) {
+                    int initialQuota) {
         this.quantumSize = quantumSize;
         var settings = new LfuBlockSettings(blockConfig);
         final double decayFactor = settings.decayFactor();
@@ -50,8 +46,6 @@ public class LfuBlock implements PipelineBlock {
             this.protectedBlock = new CraBlock(decayFactor, maxLists, 0, latencyEstimator, "protected");
         }
 
-        this.ghostBlock = new CraBlock(decayFactor, maxLists, ghostSize * quantumSize, latencyEstimator, "ghost");
-
         this.capacity = quantumSize * initialQuota;
     }
 
@@ -67,12 +61,6 @@ public class LfuBlock implements PipelineBlock {
             protectedBlock.increaseCapacity(quantumSize);
             probationBlock.appendItems(items);
         }
-
-        for (EntryData item : items) {
-            if (ghostBlock.isHit(item.key())) {
-                ghostBlock.remove(item.key());
-            }
-        }
     }
 
     @Override
@@ -82,18 +70,13 @@ public class LfuBlock implements PipelineBlock {
         List<EntryData> items = new ArrayList<>(numOfItems);
 
         for (int i = 0; i < numOfItems; ++i) {
-            if (protectedBlock.size() > 0) {
+            if (probationBlock.size() <= probationBlock.capacity() && protectedBlock.size() > 0) {
                 EntryData protectedVictim = protectedBlock.removeVictim();
                 probationBlock.addEntry(protectedVictim);
             }
 
             EntryData victim = probationBlock.removeVictim();
             items.add(victim);
-
-            if (admittor.admit(victim.key(), ghostBlock.findVictim().key())) {
-                ghostBlock.removeVictim();
-                ghostBlock.addEntry(victim);
-            }
         }
 
         capacity -= quantumSize;
@@ -107,6 +90,20 @@ public class LfuBlock implements PipelineBlock {
         return items;
     }
 
+    private LfuBlock(LfuBlock other) {
+        this.quantumSize = other.quantumSize;
+        this.capacity = other.capacity;
+        this.admittor = new UneditableAdmittorProxy(other.admittor);
+
+        this.probationBlock = other.probationBlock.createGhostCopy("Probation Copy");
+        this.protectedBlock = other.protectedBlock.createGhostCopy("Protected Copy");
+    }
+
+    @Override
+    public PipelineBlock createCopy() {
+        return new LfuBlock(this);
+    }
+
     /*
      * The cost of shrink will be (quantumSize / probationSize) * latency as an approximation
      * instead of doing additional part for the "end of cache"
@@ -116,25 +113,17 @@ public class LfuBlock implements PipelineBlock {
     public EntryData getEntry(long key) {
         final boolean isInProtected = protectedBlock.isHit(key);
         final boolean isInProbation = probationBlock.isHit(key);
-        final boolean isInGhost = ghostBlock.isHit(key);
 
-        Assert.assertCondition((isInProtected ^ isInProbation ^ isInGhost) || (!isInProtected && !isInProbation && !isInGhost),
-                               () -> String.format("Found key %d in multiple parts: %b, %b, %b", key, isInProtected, isInProbation, isInGhost));
+        Assert.assertCondition((isInProtected ^ isInProbation) || (!isInProtected && !isInProbation),
+                               () -> String.format("Found key %d in multiple parts: %b, %b", key, isInProtected, isInProbation));
 
         EntryData entry = null;
         if (isInProbation) {
             entry = probationBlock.get(key);
             promoteToProtected(entry);
-
-            shrinkCost += entry.event().missPenalty() * probationCostFactor();
         } else if (isInProtected) {
             entry = protectedBlock.get(key);
             protectedBlock.moveToTail(key);
-        } else if (isInGhost) {
-            EntryData ghostItem = ghostBlock.get(key);
-            ghostBlock.moveToTail(key);
-
-            expansionBenefit += ghostItem.event().missPenalty();
         }
 
         return entry;
@@ -149,10 +138,6 @@ public class LfuBlock implements PipelineBlock {
             protectedBlock.remove(demote.key());
             probationBlock.addEntry(demote);
         }
-    }
-
-    private double probationCostFactor() {
-        return (double) this.quantumSize / this.probationBlock.size();
     }
 
     @Nullable
@@ -172,34 +157,15 @@ public class LfuBlock implements PipelineBlock {
                 } else {
                     evicted = data;
                 }
-
-                if (ghostBlock.isHit(data.key())) {
-                    ghostBlock.remove(data.key());
-                }
             } else {
                 probationBlock.addEntry(data);
-
-                Assert.assertCondition(!ghostBlock.isHit(data.key()),
-                                       () -> String.format("LFU: item %d exists in ghost, but cache not full",
-                                                           data.key()));
             }
         }
 
-        if (evicted != null) {
-            if (ghostBlock.size() >= ghostBlock.capacity()) {
-                boolean shouldAdmitToGhost = admittor.admit(evicted.key(), ghostBlock.findVictim().key());
-                if (shouldAdmitToGhost) {
-                    ghostBlock.removeVictim();
-                    ghostBlock.addEntry(evicted);
-                }
-            } else {
-                ghostBlock.addEntry(evicted);
-            }
-        }
+        admittor.record(data.key());
 
         Assert.assertCondition(protectedBlock.size() <= protectedBlock.capacity()
-                               && probationBlock.size() + protectedBlock.size() <= this.capacity()
-                               && ghostBlock.size() <= ghostBlock.capacity(),
+                               && probationBlock.size() + protectedBlock.size() <= this.capacity(),
                                "LFU: Size overflow");
 
         Assert.assertCondition(sizeBefore < capacity() || capacity() == 0 || evicted != null, "Got no evicted item when the cache is full");
@@ -228,31 +194,6 @@ public class LfuBlock implements PipelineBlock {
                                () -> String.format("Size overflow: size: %d, capacity: %d", size, capacity));
         Assert.assertCondition(capacity == probationBlock.capacity() + protectedBlock.capacity(),
                                () -> String.format("Capacity mismatch. Total: %d, probation: %d, protected: %d", capacity, probationBlock.capacity(), protectedBlock.capacity()));
-        Assert.assertCondition(ghostBlock.size() <= ghostBlock.capacity(),
-                               () -> String.format("Ghost block overflow: size: %d, capacity %d",
-                                                   ghostBlock.size(),
-                                                   ghostBlock.capacity()));
-    }
-
-    @Override
-    public boolean isGhostFull() {
-        return ghostBlock.size() >= ghostBlock.capacity();
-    }
-
-    @Override
-    public double getExpansionBenefit() {
-        return expansionBenefit;
-    }
-
-    @Override
-    public double getShrinkCost() {
-        return shrinkCost;
-    }
-
-    @Override
-    public void resetStats() {
-        this.shrinkCost = 0;
-        this.expansionBenefit = 0;
     }
 
     private static class LfuBlockSettings extends BasicSettings {

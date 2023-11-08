@@ -42,13 +42,8 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                                                     WindowCAWithBBSettings settings,
                                                     int decayFactor,
                                                     int maxLists) {
-        this.policyStats = new WindowCAWithBBStats("sketch.WindowCAWithBB (%.0f%%,decayFactor=%d,maxLists=%d)",
-                                                   100 * (1.0d - percentMain),
-                                                   decayFactor,
-                                                   maxLists);
         this.latencyEstimator = createLatencyEstimator(settings);
         this.burstEstimator = createBurstEstimator(settings);
-        this.admittor = new LATinyLfu(settings.config(), policyStats, latencyEstimator);
 
         this.cacheCapacity = (int) settings.maximumSize();
 
@@ -71,6 +66,13 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                                            "probation-block");
         this.windowBlock = new CraBlock(decayFactor, maxLists, windowCapacity, latencyEstimator, "window-block");
         this.burstBlock = new BurstBlock(burstCacheCapacity, burstEstimator);
+
+        this.policyStats = new WindowCAWithBBStats("sketch.WindowCAWithBB (%.0f%%, %.0f%%, %.0f%%)",
+                                                   (double) 100 * windowCapacity / cacheCapacity,
+                                                   (double) 100 * mainCacheSize / cacheCapacity,
+                                                   (double) 100 * burstCacheCapacity / cacheCapacity);
+
+        this.admittor = new LATinyLfu(settings.config(), policyStats, latencyEstimator);
 
         this.normalizationBias = 0;
         this.normalizationFactor = 0;
@@ -307,32 +309,38 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         }
 
         EntryData windowBlockVictim = windowBlock.removeVictim();
-        probationBlock.addEntry(windowBlockVictim);
-        if (lfuSize() > lfuCapacity()) {
-            EntryData probationBlockVictim = probationBlock.findVictim();
-            EntryData evict = admittor.admit(windowBlockVictim.event(), probationBlockVictim.event())
-                              ? probationBlockVictim
-                              : windowBlockVictim;
+        if (lfuCapacity() > 0) {
+            probationBlock.addEntry(windowBlockVictim);
+            if (lfuSize() > lfuCapacity()) {
+                EntryData probationBlockVictim = probationBlock.findVictim();
+                EntryData evict = admittor.admit(windowBlockVictim.event(), probationBlockVictim.event())
+                                  ? probationBlockVictim
+                                  : windowBlockVictim;
 
-            probationBlock.remove(evict.key());
+                probationBlock.remove(evict.key());
 
-            if (burstBlock.capacity() > 0) {
-                final double evictScore = burstEstimator.getLatencyEstimation(evict.key(), eventTime);
-                if (burstBlock.isFull()) {
-                    final EntryData burstVictim = burstBlock.getVictim();
-                    final double burstVictimScore = burstEstimator.getLatencyEstimation(burstVictim.key(), eventTime);
+                if (burstBlock.capacity() > 0) {
+                    final double evictScore = burstEstimator.getLatencyEstimation(evict.key(), eventTime);
+                    if (burstBlock.isFull()) {
+                        final EntryData burstVictim = burstBlock.getVictim();
+                        final double burstVictimScore = burstEstimator.getLatencyEstimation(burstVictim.key(),
+                                                                                            eventTime);
 
-                    if (evictScore >= burstVictimScore) {
-                        burstBlock.removeVictim();
-                        burstBlock.admit(evict);
+                        if (evictScore >= burstVictimScore) {
+                            burstBlock.removeVictim();
+                            burstBlock.admit(evict);
+                        }
+
                         policyStats.recordEviction();
+                    } else {
+                        burstBlock.admit(evict);
                     }
                 } else {
-                    burstBlock.admit(evict);
+                    policyStats.recordEviction();
                 }
-            } else {
-                policyStats.recordEviction();
             }
+        } else {
+            policyStats.recordEviction();
         }
     }
 

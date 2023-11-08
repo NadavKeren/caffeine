@@ -1,4 +1,4 @@
-package com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.Pipeline;
+package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline;
 
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 
@@ -10,19 +10,16 @@ public interface PipelineBlock {
 
     List<EntryData> decreaseSize();
 
+    PipelineBlock createCopy();
+
+
     @Nullable EntryData getEntry(long key);
-
     @Nullable EntryData insert(EntryData data);
-    EntryData getVictim();
 
+    EntryData getVictim();
     int size();
+
     int capacity();
 
     void validate();
-
-    boolean isGhostFull();
-
-    double getExpansionBenefit();
-    double getShrinkCost();
-    void resetStats();
 }

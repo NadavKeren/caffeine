@@ -46,6 +46,9 @@ import com.github.benmanes.caffeine.cache.simulator.policy.irr.FrdPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.irr.HillClimberFrdPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.irr.IndicatorFrdPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.irr.LirsPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.YanLi;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.FullGhostHillClimber;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.PipelinePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.FrequentlyUsedPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.LinkedPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.MultiQueuePolicy;
@@ -69,7 +72,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowCostAwar
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.AdaptiveCAWithBurstBlockPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.HillClimberWindowTinyLfuPolicy;
-import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.Pipeline.AdaptivePipelineCache;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.AdaptivePipelineCache;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.feedback.FeedbackTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.feedback.FeedbackWindowTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.segment.FullySegmentedWindowTinyLfuPolicy;
@@ -126,6 +129,13 @@ public final class Registry {
     registerTwoQueue();
     registerAdaptive();
     registerGreedyDual();
+    registerLatencyAware();
+  }
+
+  private void registerLatencyAware() {
+    register(YanLi.class, YanLi::new);
+    register(PipelinePolicy.class, PipelinePolicy::new);
+    register(FullGhostHillClimber.class, FullGhostHillClimber::new);
   }
 
   /** Registers the policy based on the annotated name. */

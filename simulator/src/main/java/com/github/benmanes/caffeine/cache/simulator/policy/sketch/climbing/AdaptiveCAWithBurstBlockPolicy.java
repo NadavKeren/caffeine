@@ -42,6 +42,10 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
     private double timeframePenalty = 0;
     private int timeframeOpCount = 0;
     private int timeframeHitCount = 0;
+
+    final private int[] opPerType = new int[3];
+    final private int[] hitPerType = new int[3];
+
     private List<CacheState> capacityHistory;
 
     private final ResizableWindowCostAwareWithBurstinessBlockPolicy[] ghostCaches;
@@ -108,7 +112,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                                    quantumSize));
             }
 
-            finished();
+            validate();
         } catch (RuntimeException e) {
             e.printStackTrace();
             System.exit(1);
@@ -179,11 +183,14 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         final double missPenaltyBefore = stats().missPenalty();
         this.mainCache.record(event);
 
+        int idx = (int) event.key() / 100;
+        ++opPerType[idx];
         switch (event.getStatus()) {
             case HIT:
                 this.timeframeHitCount++;
                 this.timeframeOpCount++;
                 this.timeframePenalty += event.hitPenalty();
+                ++hitPerType[idx];
                 break;
             case DELAYED_HIT:
                 this.timeframeOpCount++;
@@ -194,6 +201,8 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                 this.timeframePenalty += event.missPenalty();
                 break;
         }
+
+
 
         for (int i = 0; i < NUM_OF_POSSIBLE_CACHES; ++i) {
             this.ghostCaches[i].record(event);
@@ -225,7 +234,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
             validateStats();
         }
 
-        finished();
+        validate();
     }
 
     private void validateStats() {
@@ -382,8 +391,7 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         ++this.adaptionNumber;
     }
 
-    @Override
-    public void finished() {
+    private void validate() {
         mainCache.validateCapacity();
         mainCache.validateSize();
 
@@ -392,6 +400,16 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
                 ghostCaches[i].validateCapacity();
                 ghostCaches[i].validateSize();
             }
+        }
+    }
+
+    @Override
+    public void finished() {
+        this.validate();
+
+        System.out.println(this.getClass().getSimpleName());
+        for (int i = 0; i < 3; ++i) {
+            System.out.println(i + ": " + (100 * (double) hitPerType[i] / opPerType[i]));
         }
     }
 
