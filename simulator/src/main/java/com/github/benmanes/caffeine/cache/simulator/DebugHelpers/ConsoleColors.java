@@ -29,6 +29,10 @@ public class ConsoleColors {
         return color + str + RESET;
     }
 
+    public static <T> String colorString(T value, String color) {
+        return color + value.toString() + RESET;
+    }
+
     @FormatMethod
     public static String errorString(String format, Object... args) {
         return RED_BOLD + String.format(format, args) + RESET;
