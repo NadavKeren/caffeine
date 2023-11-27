@@ -9,6 +9,10 @@ import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock;
 import com.typesafe.config.Config;
 
 import javax.annotation.Nullable;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.nio.charset.Charset;
 import java.util.List;
 import java.util.Set;
 import java.util.function.DoubleSupplier;
@@ -19,6 +23,8 @@ import static java.util.stream.Collectors.toSet;
 @Policy.PolicySpec(name = "sketch.WindowCABurstBlock")
 public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
     private static int ID = 0;
+    private final static boolean DEBUG = false;
+    @Nullable private PrintWriter dumper = null;
     protected WindowCAWithBBStats policyStats;
     protected final LatencyEstimator<Long> latencyEstimator;
     protected final LatencyEstimator<Long> burstEstimator;
@@ -79,6 +85,15 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         this.maxDelta = 0;
         this.maxDeltaCounts = 0;
         this.samplesCount = 0;
+
+        if (DEBUG) {
+            try {
+                FileWriter file = new FileWriter("/tmp/WCAWBB.dump", Charset.defaultCharset());
+                dumper = new PrintWriter(file);
+            } catch (IOException ex) {
+                Assert.assertCondition(false, ex.getMessage());
+            }
+        }
     }
 
     public WindowCostAwareWithBurstinessBlockPolicy(int windowSize,
@@ -243,7 +258,11 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         event.changeEventStatus(AccessEvent.EventStatus.MISS);
         admittor.record(event);
         windowBlock.addEntry(event);
-        evict(event.getArrivalTime());
+
+        if (dumper != null) {
+            dumper.print(event.eventNum() + " LRU: " + event.key() + " -> ");
+        }
+        evict(event.getArrivalTime(), event.eventNum());
     }
 
     /**
@@ -303,12 +322,22 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
      * Evicts from the admission window into the probation space. If the size exceeds the maximum,
      * then the admission candidate and probation's victim are evaluated and one is evicted.
      */
-    private void evict(double eventTime) {
+    private void evict(double eventTime, int eventNum) {
         if (!windowBlock.isFull()) {
+            if (dumper != null) {
+                dumper.println("null");
+                dumper.println("---------------");
+            }
             return;
         }
 
         EntryData windowBlockVictim = windowBlock.removeVictim();
+
+        if (dumper != null) {
+            dumper.println(windowBlockVictim.key());
+            dumper.print(eventNum + " LFU: " + windowBlockVictim.key() + " -> ");
+        }
+
         if (lfuCapacity() > 0) {
             probationBlock.addEntry(windowBlockVictim);
             if (lfuSize() > lfuCapacity()) {
@@ -316,6 +345,11 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                 EntryData evict = admittor.admit(windowBlockVictim.event(), probationBlockVictim.event())
                                   ? probationBlockVictim
                                   : windowBlockVictim;
+
+                if (dumper != null) {
+                    dumper.println(evict.key());
+                    dumper.print(eventNum + " BC: " + evict.key() + " -> ");
+                }
 
                 probationBlock.remove(evict.key());
 
@@ -329,18 +363,42 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                         if (evictScore >= burstVictimScore) {
                             burstBlock.removeVictim();
                             burstBlock.admit(evict);
+
+                            if (dumper != null) {
+                                dumper.println(burstVictim.key());
+                            }
+                        } else if (dumper != null) {
+                            dumper.println(evict.key());
                         }
 
                         policyStats.recordEviction();
                     } else {
                         burstBlock.admit(evict);
+
+                        if (dumper != null) {
+                            dumper.println("null");
+                        }
                     }
                 } else {
                     policyStats.recordEviction();
+
+                    if (dumper != null) {
+                        dumper.println(evict.key());
+                    }
                 }
+            } else if (dumper != null) {
+                dumper.println("null");
             }
+
         } else {
             policyStats.recordEviction();
+            if (dumper != null) {
+                dumper.println("null");
+            }
+        }
+
+        if (dumper != null) {
+            dumper.println("---------------");
         }
     }
 
@@ -436,7 +494,14 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
     }
 
     @Override
-    public void dump() {burstBlock.dump();}
+    public void dump() {
+        burstBlock.dump();
+
+        if (dumper != null) {
+            dumper.flush();
+            dumper.close();
+        }
+    }
 
 
     @Override
