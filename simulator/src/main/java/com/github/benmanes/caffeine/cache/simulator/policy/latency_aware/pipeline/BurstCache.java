@@ -56,7 +56,7 @@ public class BurstCache implements PipelineBlock {
 
     @Override
     public @Nullable EntryData insert(EntryData data) {
-        EntryData res = null;
+        EntryData res = data;
         if (this.block.capacity() > 0) {
             res = addToCacheIfBetter(data);
         }

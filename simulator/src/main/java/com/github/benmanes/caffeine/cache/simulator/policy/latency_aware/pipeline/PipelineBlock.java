@@ -14,6 +14,9 @@ public interface PipelineBlock {
 
 
     @Nullable EntryData getEntry(long key);
+
+    default void onMiss(long key) {}
+
     @Nullable EntryData insert(EntryData data);
 
     EntryData getVictim();
@@ -22,4 +25,6 @@ public interface PipelineBlock {
     int capacity();
 
     void validate();
+
+    default void bookkeeping(long key) {}
 }

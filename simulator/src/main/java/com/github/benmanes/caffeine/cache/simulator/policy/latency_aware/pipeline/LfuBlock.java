@@ -22,6 +22,14 @@ public class LfuBlock implements PipelineBlock {
     final private CraBlock probationBlock;
     private int capacity;
 
+    private LatencyEstimator<Long> latencyEstimator;
+
+    protected double normalizationBias = 0;
+    protected double normalizationFactor = 0;
+    protected double maxDelta = 0;
+    protected int maxDeltaCounts = 0;
+    protected int samplesCount = 0;
+
     public LfuBlock(Config config,
                     Config blockConfig,
                     LatencyEstimator<Long> latencyEstimator,
@@ -31,6 +39,7 @@ public class LfuBlock implements PipelineBlock {
         var settings = new LfuBlockSettings(blockConfig);
         final double decayFactor = settings.decayFactor();
         final int maxLists = settings.maxLists();
+        this.latencyEstimator = latencyEstimator;
 
         this.admittor = new LATinyLfu(config, new PolicyStats("LATinyLFU"), latencyEstimator);
 
@@ -123,21 +132,55 @@ public class LfuBlock implements PipelineBlock {
             promoteToProtected(entry);
         } else if (isInProtected) {
             entry = protectedBlock.get(key);
-            protectedBlock.moveToTail(key);
+            protectedBlock.moveToTail(entry);
         }
 
         return entry;
+    }
+
+    @Override
+    public void bookkeeping(long key) {
+        admittor.record(key);
+    }
+
+    @Override
+    public void onMiss(long key) {
+        updateNormalization(key);
     }
 
     private void promoteToProtected(EntryData entry) {
         probationBlock.remove(entry.key());
         protectedBlock.addEntry(entry);
 
-        if (protectedBlock.size() >= protectedBlock.capacity()) {
+        if (protectedBlock.isFull()) {
             EntryData demote = protectedBlock.findVictim();
             protectedBlock.remove(demote.key());
             probationBlock.addEntry(demote);
         }
+    }
+
+    public void updateNormalization(long key) {
+        double delta = latencyEstimator.getDelta(key);
+
+        if (delta > normalizationFactor) {
+            ++samplesCount;
+            ++maxDeltaCounts;
+
+            maxDelta = (maxDelta * maxDeltaCounts + delta) / maxDeltaCounts;
+        }
+
+        normalizationBias = normalizationBias > 0
+                            ? Math.min(normalizationBias, Math.max(0, delta))
+                            : Math.max(0, delta);
+
+        if (samplesCount % 1000 == 0 || normalizationFactor == 0) {
+            normalizationFactor = maxDelta;
+            maxDeltaCounts = 1;
+            samplesCount = 0;
+        }
+
+        protectedBlock.setNormalization(normalizationBias, normalizationFactor);
+        probationBlock.setNormalization(normalizationBias, normalizationFactor);
     }
 
     @Nullable
@@ -149,6 +192,7 @@ public class LfuBlock implements PipelineBlock {
         if (capacity > 0) {
             if (probationBlock.size() + protectedBlock.size() >= capacity) {
                 EntryData victim = probationBlock.findVictim();
+                Assert.assertCondition(victim != data, "Got the same item");
                 boolean shouldAdmit = admittor.admit(data.key(), victim.key());
 
                 if (shouldAdmit) {
@@ -162,13 +206,12 @@ public class LfuBlock implements PipelineBlock {
             }
         }
 
-        admittor.record(data.key());
-
         Assert.assertCondition(protectedBlock.size() <= protectedBlock.capacity()
                                && probationBlock.size() + protectedBlock.size() <= this.capacity(),
                                "LFU: Size overflow");
 
         Assert.assertCondition(sizeBefore < capacity() || capacity() == 0 || evicted != null, "Got no evicted item when the cache is full");
+
         return evicted;
     }
 

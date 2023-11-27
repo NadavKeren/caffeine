@@ -14,8 +14,17 @@ public class LruBlock implements PipelineBlock {
     final private int quantumSize;
     final private CraBlock block;
 
+    private LatencyEstimator<Long> latencyEstimator;
+
+    protected double normalizationBias = 0;
+    protected double normalizationFactor = 0;
+    protected double maxDelta = 0;
+    protected int maxDeltaCounts = 0;
+    protected int samplesCount = 0;
+
     public LruBlock(Config config, LatencyEstimator<Long> latencyEstimator, int quantumSize, int initialQuota) {
         this.quantumSize = quantumSize;
+        this.latencyEstimator = latencyEstimator;
 
         var settings = new LruBlockSettings(config);
         int maxLists = settings.maxLists();
@@ -61,6 +70,11 @@ public class LruBlock implements PipelineBlock {
         return entry;
     }
 
+    @Override
+    public void bookkeeping(long key) {
+        updateNormalization(key);
+    }
+
     @Nullable
     @Override
     public EntryData insert(EntryData data) {
@@ -71,7 +85,32 @@ public class LruBlock implements PipelineBlock {
             victim = block.removeVictim();
         }
 
+        updateNormalization(data.key());
+
         return victim;
+    }
+
+    public void updateNormalization(long key) {
+        double delta = latencyEstimator.getDelta(key);
+
+        if (delta > normalizationFactor) {
+            ++samplesCount;
+            ++maxDeltaCounts;
+
+            maxDelta = (maxDelta * maxDeltaCounts + delta) / maxDeltaCounts;
+        }
+
+        normalizationBias = normalizationBias > 0
+                            ? Math.min(normalizationBias, Math.max(0, delta))
+                            : Math.max(0, delta);
+
+        if (samplesCount % 1000 == 0 || normalizationFactor == 0) {
+            normalizationFactor = maxDelta;
+            maxDeltaCounts = 1;
+            samplesCount = 0;
+        }
+
+        this.block.setNormalization(normalizationBias, normalizationFactor);
     }
 
     @Override
