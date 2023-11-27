@@ -39,6 +39,8 @@ public final class LATinyLfu implements Admittor {
   private final Frequency sketch;
   private LatencyEstimator<Long> latencyEstimator;
 
+  private static final boolean DEBUG = false;
+
   @Override
   public void record(long key) {
     Admittor.super.record(key);
@@ -94,6 +96,19 @@ public final class LATinyLfu implements Admittor {
     double candidateScore = getScore(candidateKey);
     double victimScore = getScore(victimKey);
     boolean shouldAdmit = candidateScore > victimScore;
+
+    if (DEBUG) {
+      System.out.println(String.format(
+              "Candidate\t\033[1;37m %4s\t\033[0;37m %d \033[1;36m %06.1f \033[0;37m\t\tVictim:\t\033[1;37m %4s\t%d \033[1;36m %06.1f\033[0;37m\t\t\033[1;33m %b \033[0m",
+              candidateKey,
+              sketch.frequency(candidateKey),
+              candidateScore,
+              victimKey,
+              sketch.frequency(victimKey),
+              victimScore,
+              shouldAdmit));
+    }
+
     if (shouldAdmit) {
       policyStats.recordAdmission();
     } else {
