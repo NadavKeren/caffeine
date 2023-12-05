@@ -43,9 +43,6 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
     private int timeframeOpCount = 0;
     private int timeframeHitCount = 0;
 
-    final private int[] opPerType = new int[3];
-    final private int[] hitPerType = new int[3];
-
     private List<CacheState> capacityHistory;
 
     private final ResizableWindowCostAwareWithBurstinessBlockPolicy[] ghostCaches;
@@ -183,14 +180,11 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
         final double missPenaltyBefore = stats().missPenalty();
         this.mainCache.record(event);
 
-        int idx = (int) event.key() / 100;
-        ++opPerType[idx];
         switch (event.getStatus()) {
             case HIT:
                 this.timeframeHitCount++;
                 this.timeframeOpCount++;
                 this.timeframePenalty += event.hitPenalty();
-                ++hitPerType[idx];
                 break;
             case DELAYED_HIT:
                 this.timeframeOpCount++;
@@ -406,11 +400,6 @@ public class AdaptiveCAWithBurstBlockPolicy implements Policy {
     @Override
     public void finished() {
         this.validate();
-
-        System.out.println(this.getClass().getSimpleName());
-        for (int i = 0; i < 3; ++i) {
-            System.out.println(i + ": " + (100 * (double) hitPerType[i] / opPerType[i]));
-        }
     }
 
     private PrintWriter prepareFileWriter() {
