@@ -72,7 +72,7 @@ public class YanLi implements Policy {
             }
         }
 
-        Assert.assertCondition(minVal < Double.MAX_VALUE || victim != Long.MAX_VALUE, "No victim chosen!");
+        Assert.assertCondition(minVal < Double.MAX_VALUE && victim != Long.MAX_VALUE, "No victim chosen!");
 
         items.remove(victim);
     }
