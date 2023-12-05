@@ -17,6 +17,11 @@ public class BurstCache implements PipelineBlock {
         block = new BurstBlock(initialQuota * quantumSize, burstEstimator);
     }
 
+    private BurstCache(BurstCache other) {
+        this.quantumSize = other.quantumSize;
+        this.block = new BurstBlock(other.block, "BC copy");
+    }
+
     @Override
     public void increaseSize(List<EntryData> items) {
         block.increaseSize(quantumSize, items);
@@ -31,7 +36,7 @@ public class BurstCache implements PipelineBlock {
 
     @Override
     public PipelineBlock createCopy() {
-        return null;
+        return new BurstCache(this);
     }
 
     private @Nullable EntryData addToCacheIfBetter(EntryData item) {

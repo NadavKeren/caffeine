@@ -47,14 +47,15 @@ public class LruBlock implements PipelineBlock {
         return block.decreaseSize(quantumSize);
     }
 
-//    private LruBlock(LruBlock other) {
-//        this.quantumSize = other.quantumSize;
-//        this.block = other.block.createGhostCopy("LRU copy");
-//    }
+    private LruBlock(LruBlock other) {
+        this.quantumSize = other.quantumSize;
+        this.block = other.block.createGhostCopy("LRU copy");
+        this.latencyEstimator = other.latencyEstimator;
+    }
 
     @Override
     public PipelineBlock createCopy() {
-        return null;
+        return new LruBlock(this);
     }
 
     @Nullable

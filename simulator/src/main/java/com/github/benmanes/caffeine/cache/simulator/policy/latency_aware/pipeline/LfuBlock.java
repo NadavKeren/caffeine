@@ -103,6 +103,7 @@ public class LfuBlock implements PipelineBlock {
         this.quantumSize = other.quantumSize;
         this.capacity = other.capacity;
         this.admittor = new UneditableAdmittorProxy(other.admittor);
+        this.latencyEstimator = other.latencyEstimator;
 
         this.probationBlock = other.probationBlock.createGhostCopy("Probation Copy");
         this.protectedBlock = other.protectedBlock.createGhostCopy("Protected Copy");

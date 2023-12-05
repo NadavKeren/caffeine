@@ -33,7 +33,9 @@ import java.util.List;
 @Policy.PolicySpec(name = "latency-aware.Pipeline")
 public class PipelinePolicy implements Policy {
     final private static boolean DEBUG = false;
-    @Nullable private PrintWriter dumper = null;
+
+    final public static PipelinePolicy DUMMY = new DummyPipeline();
+
     final private PolicyStats stats;
     final private PipelineBlock[] blocks;
     final private int[] quota;
@@ -46,14 +48,28 @@ public class PipelinePolicy implements Policy {
     private double timeframePenalty = 0;
     private int timeframeOpCount = 0;
 
-    private PrintWriter opDumpWriter = null;
-    private PrintWriter evictionDumpWriter = null;
+    @Nullable private PrintWriter dumper = null;
+    @Nullable private PrintWriter opDumpWriter = null;
+    @Nullable private PrintWriter evictionDumpWriter = null;
 
     /*
      * TODO: nkeren: consult Ben regarding how to share these with only one party making the updates.
      */
     final private LatencyEstimator<Long> latencyEstimator;
     final private LatencyEstimator<Long> burstEstimator;
+
+    private PipelinePolicy() {
+        this.stats = null;
+        this.blocks = null;
+        this.quota = null;
+        this.types = null;
+        this.totalQuanta = 0;
+        this.blockCount = 0;
+        this.quantumSize = 0;
+        this.cacheCapacity = 0;
+        this.latencyEstimator = null;
+        this.burstEstimator = null;
+    }
 
     /***
      * The standalone constructor, gets the configuration of the pipeline and its block.
@@ -186,6 +202,8 @@ public class PipelinePolicy implements Policy {
             blocks[i] = source.blocks[i].createCopy();
             types[i] = source.types[i];
             quota[i] = source.quota[i];
+
+            Assert.assertCondition(blocks[i] != null, "Created null copy at: " + i);
         }
 
         stats = new PolicyStats("Copy of " + generatePipelineName());
@@ -198,7 +216,10 @@ public class PipelinePolicy implements Policy {
     @Override
     public void record(AccessEvent event) {
         EntryData entry = null;
-        opDumpWriter.println(ConsoleColors.colorString("event: " + event.eventNum(), ConsoleColors.WHITE_BOLD));
+
+        if (DEBUG) {
+            opDumpWriter.println(ConsoleColors.colorString("event: " + event.eventNum(), ConsoleColors.WHITE_BOLD));
+        }
 
         for (int idx = 0; idx < blockCount; ++idx) {
             // Not stopping after item is found in order to let all blocks perform bookkeeping
@@ -252,7 +273,10 @@ public class PipelinePolicy implements Policy {
 
     private void insertionProcess(EntryData newItem) {
         var eventNum = newItem.event().eventNum();
-        opDumpWriter.println(ConsoleColors.minorInfoString("Inserting %d", newItem.event().key()));
+        if (DEBUG) {
+            opDumpWriter.println(ConsoleColors.minorInfoString("Inserting %d", newItem.event().key()));
+        }
+
         for (int idx = 0; idx < blockCount; ++idx) {
             if (newItem != null) {
                 if (dumper != null) {
@@ -375,11 +399,13 @@ public class PipelinePolicy implements Policy {
     }
 
     public boolean canExtend(int idx) {
-        return idx < totalQuanta;
+        Assert.assertCondition(idx < blockCount && idx >= 0, () -> "Illegal block idx: " + idx);
+        return quota[idx] < totalQuanta;
     }
 
     public boolean canShrink(int idx) {
-        return idx > 0;
+        Assert.assertCondition(idx < blockCount && idx >= 0, () -> "Illegal block idx: " + idx);
+        return quota[idx] > 0;
     }
 
     public String getType(int idx) { return types[idx].toString(); }
@@ -446,6 +472,42 @@ public class PipelinePolicy implements Policy {
 
         public int quota() {
             return config.getInt("quota");
+        }
+    }
+
+    private static class DummyPipeline extends PipelinePolicy {
+        public DummyPipeline() {
+            super();
+        }
+
+        @Override
+        public PipelinePolicy createCopy() {
+            return this;
+        }
+
+        @Override
+        public void record(AccessEvent event) {
+            // Not doing anything
+        }
+
+        @Override
+        public double getTimeframeAveragePenalty() {
+            return Double.MAX_VALUE;
+        }
+
+        @Override
+        public void moveQuantum(int incIdx, int decIdx) {
+            // Not doing anything
+        }
+
+        @Override
+        public boolean canExtend(int idx) {
+            return false;
+        }
+
+        @Override
+        public boolean canShrink(int idx) {
+            return false;
         }
     }
 
