@@ -117,15 +117,15 @@ public class YanLi implements Policy {
 
         public void addArrival(double arrivalTime) {
             final double interArrivalTime = arrivalTime - lastArrivalTime;
+            Assert.assertCondition(interArrivalTime > 0, "negative inter-arrival time");
             interArrivalTimes.addLast(interArrivalTime);
 
             if (interArrivalTimes.size() > MAX_INTER_ARRIVAL_TIMES) {
                 double removed = interArrivalTimes.removeFirst();
-                estimate -= removed / MAX_INTER_ARRIVAL_TIMES;
-                estimate += interArrivalTime / MAX_INTER_ARRIVAL_TIMES;
+                estimate -= removed;
+                estimate += interArrivalTime;
             } else {
-                estimate = estimate * (interArrivalTimes.size() - 1) + interArrivalTime;
-                estimate /= interArrivalTimes.size();
+                estimate += interArrivalTime;
             }
 
             Assert.assertCondition(interArrivalTimes.size() <= MAX_INTER_ARRIVAL_TIMES,
@@ -134,7 +134,7 @@ public class YanLi implements Policy {
             Assert.assertCondition(estimate > 0, "Invalid rate estimate");
         }
 
-        private double rate() { return 1 / estimate; }
+        private double rate() { return interArrivalTimes.size() / estimate; }
 
         public double score() {
             final double rate = rate();
