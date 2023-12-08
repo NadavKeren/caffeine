@@ -134,7 +134,7 @@ public final class Registry {
 
   private void registerLatencyAware() {
     register(YanLi.class, YanLi::new);
-    register(PipelinePolicy.class, PipelinePolicy::new);
+    register(PipelinePolicy.class, PipelinePolicy::policy);
     register(FullGhostHillClimber.class, FullGhostHillClimber::new);
   }
 

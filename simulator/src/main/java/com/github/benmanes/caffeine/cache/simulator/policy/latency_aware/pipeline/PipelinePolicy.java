@@ -77,10 +77,14 @@ public class PipelinePolicy implements Policy {
      *               and the configuration of each block in the pipeline.
      */
     public PipelinePolicy(Config config) {
+        this(config, 0);
+    }
+
+    public PipelinePolicy(Config config, int shrinkOrder) {
         var settings = new PipelineSettings(config);
 
         totalQuanta = settings.numOfQuanta();
-        quantumSize = settings.quantumSize();
+        quantumSize = settings.quantumSize() >> shrinkOrder;
         cacheCapacity = totalQuanta * quantumSize;
 
         blockCount = settings.numOfBlocks();
@@ -123,6 +127,10 @@ public class PipelinePolicy implements Policy {
         } catch (IOException exception) {
             Assert.assertCondition(false, "Got an I/O error on opening the dumpfiles: " + exception.getCause());
         }
+    }
+
+    public static Policy policy(Config config) {
+         return new PipelinePolicy(config);
     }
 
     public String generatePipelineName() {
