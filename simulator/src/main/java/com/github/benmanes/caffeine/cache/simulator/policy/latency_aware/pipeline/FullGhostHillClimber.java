@@ -34,7 +34,6 @@ public class FullGhostHillClimber implements Policy {
 
     private final int adaptionTimeframe;
     private int opsSinceAdaption = 0;
-    private final List<CacheState> stateHistory;
 
     public FullGhostHillClimber(Config config) {
         var hillClimberSettings = new FGHCSettings(config);
@@ -49,9 +48,6 @@ public class FullGhostHillClimber implements Policy {
 
         createGhostCaches();
 
-        var currentState = mainPipeline.getCurrentState();
-        stateHistory = new ArrayList<>();
-        stateHistory.add(new CacheState(0, currentState.quotas, 0));
 
         if (DEBUG) {
              writer = prepareFileWriter();
@@ -138,9 +134,11 @@ public class FullGhostHillClimber implements Policy {
             this.mainPipeline.moveQuantum(adaption.incIdx, adaption.decIdx);
             var currState = this.mainPipeline.getCurrentState();
             var currCacheState = new CacheState(eventNum, currState.quotas, currentAvg);
-            stateHistory.add(currCacheState);
-            writer.println(currCacheState.toString());
-            writer.flush();
+
+            if (DEBUG && writer != null) {
+                writer.println(currCacheState.toString());
+                writer.flush();
+            }
 
             createGhostCaches();
         }
@@ -169,15 +167,7 @@ public class FullGhostHillClimber implements Policy {
 
     @Override
     public void dump() {
-        if (DEBUG) {
-//            PrintWriter writer = prepareFileWriter();
-//
-//            for (var state: stateHistory) {
-//                writer.println(state.toString());
-//            }
-//
-//            writer.close();
-//        }
+        if (DEBUG && writer != null) {
             writer.close();
         }
     }
