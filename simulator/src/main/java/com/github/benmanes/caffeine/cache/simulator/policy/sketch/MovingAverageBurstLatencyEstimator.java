@@ -90,7 +90,7 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
         return entry.getValue(time);
     }
 
-    private class Entry {
+    protected class Entry {
         final KeyType key;
         final private int[] arrivalCounters;
         final private double latency;

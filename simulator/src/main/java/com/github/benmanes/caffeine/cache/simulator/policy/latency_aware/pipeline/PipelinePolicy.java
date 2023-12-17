@@ -11,6 +11,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.LatestLatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.MovingAverageBurstLatencyEstimator;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.MovingAverageWithSketchBurstEstimator;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigException;
 
@@ -56,7 +57,7 @@ public class PipelinePolicy implements Policy {
      * TODO: nkeren: consult Ben regarding how to share these with only one party making the updates.
      */
     final private LatencyEstimator<Long> latencyEstimator;
-    final private LatencyEstimator<Long> burstEstimator;
+    private LatencyEstimator<Long> burstEstimator;
 
     private PipelinePolicy() {
         this.stats = null;
@@ -93,12 +94,11 @@ public class PipelinePolicy implements Policy {
 
         blocks = new PipelineBlock[blockCount];
 
-        final var blockConfigs = settings.blocksConfigs();
-
         latencyEstimator = new LatestLatencyEstimator<>();
-        burstEstimator = new MovingAverageBurstLatencyEstimator<>(settings.agingWindowSize(),
-                                                                  settings.ageSmoothFactor(),
-                                                                  settings.numOfPartitions());
+        createBurstEstimator(settings);
+        Assert.assertCondition(burstEstimator != null, "The burst estimator should have been initialized");
+
+        final var blockConfigs = settings.blocksConfigs();
 
         for (int idx = 0; idx < blockCount; ++idx) {
             final Config currConfig = blockConfigs.get(idx);
@@ -126,6 +126,31 @@ public class PipelinePolicy implements Policy {
             }
         } catch (IOException exception) {
             Assert.assertCondition(false, "Got an I/O error on opening the dumpfiles: " + exception.getCause());
+        }
+    }
+
+    private void createBurstEstimator(PipelineSettings settings) {
+        String type = settings.burstEstimationType();
+
+        switch (type) {
+            case "normal" :
+                burstEstimator = new MovingAverageBurstLatencyEstimator<>(settings.agingWindowSize(),
+                                                                          settings.ageSmoothFactor(),
+                                                                          settings.numOfPartitions());
+                break;
+            case "sketch":
+                burstEstimator = new MovingAverageWithSketchBurstEstimator(settings.agingWindowSize(),
+                                                                           settings.ageSmoothFactor(),
+                                                                           settings.numOfPartitions(),
+                                                                           settings.eps(),
+                                                                           settings.confidence(),
+                                                                           settings.randomSeed(),
+                                                                           settings.agingWindowSize() * this.cacheCapacity,
+                                                                           settings.ageSmoothFactor());
+                break;
+            default:
+                Assert.assertCondition(false, "No such estimation type");
+                break;
         }
     }
 
@@ -198,6 +223,9 @@ public class PipelinePolicy implements Policy {
         this.cacheCapacity = source.cacheCapacity;
         this.timeframePenalty = 0;
         this.timeframeOpCount = 0;
+        this.dumper = null;
+        this.opDumpWriter = null;
+        this.evictionDumpWriter = null;
 
         this.blocks = new PipelineBlock[blockCount];
         this.types = new BlockType[blockCount];
@@ -225,7 +253,7 @@ public class PipelinePolicy implements Policy {
     public void record(AccessEvent event) {
         EntryData entry = null;
 
-        if (DEBUG) {
+        if (opDumpWriter != null) {
             opDumpWriter.println(ConsoleColors.colorString("event: " + event.eventNum(), ConsoleColors.WHITE_BOLD));
         }
 
@@ -281,7 +309,7 @@ public class PipelinePolicy implements Policy {
 
     private void insertionProcess(EntryData newItem) {
         var eventNum = newItem.event().eventNum();
-        if (DEBUG) {
+        if (opDumpWriter != null) {
             opDumpWriter.println(ConsoleColors.minorInfoString("Inserting %d", newItem.event().key()));
         }
 
@@ -312,6 +340,8 @@ public class PipelinePolicy implements Policy {
 
         if (newItem != null) {
             stats.recordEviction();
+            latencyEstimator.remove(newItem.key());
+            burstEstimator.remove(newItem.key());
 
             if (dumper != null) {
                 dumper.println("---------------");
@@ -320,6 +350,10 @@ public class PipelinePolicy implements Policy {
     }
 
     private void debugPrint(int idx, @Nullable EntryData item, int eventNum) {
+        if (opDumpWriter == null || evictionDumpWriter == null) {
+            throw new RuntimeException("Should not get to debugPrint with empty dumpers");
+        }
+
         if (item != null) {
             opDumpWriter.println(ConsoleColors.colorString(types[idx] + " -> ", ConsoleColors.YELLOW)
                                  + ConsoleColors.colorString(String.valueOf(item.key()),
@@ -390,8 +424,10 @@ public class PipelinePolicy implements Policy {
 
     @Override
     public void dump() {
-        opDumpWriter.flush();
-        opDumpWriter.close();
+        if (opDumpWriter != null) {
+            opDumpWriter.flush();
+            opDumpWriter.close();
+        }
     }
 
     public PipelineState getCurrentState() {
@@ -443,11 +479,17 @@ public class PipelinePolicy implements Policy {
 
         public int quantumSize() { return config().getInt(BASE_PATH + ".quantum-size"); }
 
-        public int agingWindowSize() {return config().getInt(BASE_PATH + ".burst.aging-window-size");}
+        public String burstEstimationType() { return config().getString(BASE_PATH + ".burst.type"); }
 
-        public double ageSmoothFactor() {return config().getDouble(BASE_PATH + ".burst.age-smoothing");}
+        public int agingWindowSize() {return config().getInt(BASE_PATH + ".burst.aging-window-size"); }
 
-        public int numOfPartitions() {return config().getInt(BASE_PATH + ".burst.number-of-partitions");}
+        public double ageSmoothFactor() {return config().getDouble(BASE_PATH + ".burst.age-smoothing"); }
+
+        public int numOfPartitions() {return config().getInt(BASE_PATH + ".burst.number-of-partitions"); }
+
+        public double eps() { return config().getDouble(BASE_PATH + ".burst.sketch.eps"); }
+
+        public double confidence() { return config().getDouble(BASE_PATH + ".burst.sketch.confidence"); }
 
         public List<Config> blocksConfigs() {
             final int numOfBlocks = numOfBlocks();

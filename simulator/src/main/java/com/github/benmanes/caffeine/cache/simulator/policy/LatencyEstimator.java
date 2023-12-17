@@ -28,4 +28,6 @@ public interface LatencyEstimator<KeyType> {
     default double getDelta(KeyType key) { return getLatencyEstimation(key) - getCacheHitEstimation(); }
 
     default double getCacheHitEstimation() { return 1; }
+
+    default void remove(KeyType key) {}
 }
