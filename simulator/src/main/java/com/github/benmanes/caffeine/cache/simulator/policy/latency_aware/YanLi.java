@@ -118,7 +118,7 @@ public class YanLi implements Policy {
         public void addArrival(double arrivalTime) {
             final double interArrivalTime = arrivalTime - lastArrivalTime;
             lastArrivalTime = arrivalTime;
-            Assert.assertCondition(interArrivalTime > 0, "negative inter-arrival time");
+            Assert.assertCondition(interArrivalTime >= 0, "negative inter-arrival time");
             interArrivalTimes.addLast(interArrivalTime);
 
             if (interArrivalTimes.size() > MAX_INTER_ARRIVAL_TIMES) {
