@@ -55,6 +55,10 @@ public class FullGhostHillClimber implements Policy {
     }
 
     private void createGhostCaches() {
+        for (var pair : ghostCaches) {
+            pair.first().clear();
+        }
+
         ghostCaches.clear();
 
         int idx = 0;
