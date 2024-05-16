@@ -35,6 +35,10 @@ final public class BurstBlock {
         this.c = other.c;
     }
 
+    public void clear() {
+        this.heap.clear();
+    }
+
     public EntryData removeVictim() {
         var res = heap.extractMin();
 

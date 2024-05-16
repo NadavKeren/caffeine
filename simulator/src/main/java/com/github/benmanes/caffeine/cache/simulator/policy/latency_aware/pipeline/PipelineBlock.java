@@ -27,4 +27,6 @@ public interface PipelineBlock {
     void validate();
 
     default void bookkeeping(long key) {}
+
+    void clear();
 }

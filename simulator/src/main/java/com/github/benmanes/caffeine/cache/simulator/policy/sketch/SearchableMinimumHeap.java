@@ -201,6 +201,7 @@ public class SearchableMinimumHeap<K, V> {
     public void clear() {
         Arrays.fill(this.heap, 0, this.size, (Object)null);
         this.valuesMap.clear();
+        this.idxMap.clear();
         this.size = 0;
     }
 

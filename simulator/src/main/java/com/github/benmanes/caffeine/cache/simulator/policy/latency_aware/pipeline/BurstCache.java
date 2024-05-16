@@ -23,6 +23,11 @@ public class BurstCache implements PipelineBlock {
     }
 
     @Override
+    public void clear() {
+        this.block.clear();
+    }
+
+    @Override
     public void increaseSize(List<EntryData> items) {
         block.increaseSize(quantumSize, items);
     }
