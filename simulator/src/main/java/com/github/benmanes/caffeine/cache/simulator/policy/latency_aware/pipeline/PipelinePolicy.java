@@ -158,6 +158,12 @@ public class PipelinePolicy implements Policy {
          return new PipelinePolicy(config);
     }
 
+    public void clear() {
+        for (int i = 0; i < blockCount; ++i) {
+            this.blocks[i].clear();
+        }
+    }
+
     public String generatePipelineName() {
         StringBuilder sb = new StringBuilder();
         sb.append("Pipeline (");

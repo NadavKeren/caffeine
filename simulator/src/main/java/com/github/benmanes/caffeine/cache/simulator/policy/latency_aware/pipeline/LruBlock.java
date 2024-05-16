@@ -54,6 +54,11 @@ public class LruBlock implements PipelineBlock {
     }
 
     @Override
+    public void clear() {
+        this.block.clear();
+    }
+
+    @Override
     public PipelineBlock createCopy() {
         return new LruBlock(this);
     }

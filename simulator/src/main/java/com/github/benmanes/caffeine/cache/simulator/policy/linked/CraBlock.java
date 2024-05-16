@@ -97,6 +97,22 @@ public final class CraBlock {
         this.normalizationFactor = other.normalizationFactor;
     }
 
+    public void clear() {
+        for (int i = 0; i < maxLists; ++i) {
+            var sentinel = this.lists[i];
+            while (sentinel.size > 0) {
+                sentinel.next.remove();
+            }
+            sentinel.next = null;
+            sentinel.prev = null;
+            sentinel.sentinel = null;
+            this.lists[i] = null;
+        }
+
+        data.clear();
+        activeLists.clear();
+    }
+
     private void copyLists(CraBlock other) {
         for (int i = 0; i < maxLists; ++i) {
             Node curr = other.lists[i].sentinel;

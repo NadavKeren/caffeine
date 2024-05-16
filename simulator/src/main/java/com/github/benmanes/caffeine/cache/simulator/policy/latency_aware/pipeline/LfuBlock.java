@@ -110,6 +110,12 @@ public class LfuBlock implements PipelineBlock {
     }
 
     @Override
+    public void clear() {
+        this.probationBlock.clear();
+        this.protectedBlock.clear();
+    }
+
+    @Override
     public PipelineBlock createCopy() {
         return new LfuBlock(this);
     }
