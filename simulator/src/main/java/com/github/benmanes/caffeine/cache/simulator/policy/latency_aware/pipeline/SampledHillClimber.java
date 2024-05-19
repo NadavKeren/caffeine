@@ -62,7 +62,7 @@ public class SampledHillClimber implements Policy {
         for (var pair : ghostCaches) {
             pair.first().clear();
         }
-        
+
         ghostCaches.clear();
 
         int idx = 0;
