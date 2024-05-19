@@ -45,6 +45,8 @@ public final class CraBlock {
 
     private final Long2ObjectMap<Node> data;
     private final Node[] lists;
+
+    private final Node nodePool;
     private final Set<Integer> activeLists;
     private int maximumSize;
     private int size;
@@ -63,6 +65,8 @@ public final class CraBlock {
         for (int i = 0; i <= maxLists; i++) {
             this.lists[i] = new Node();
         }
+        this.nodePool = new Node();
+
         this.activeLists = new HashSet<>();
 
         this.maximumSize = maximumSize;
@@ -82,6 +86,7 @@ public final class CraBlock {
         for (int i = 0; i <= maxLists; i++) {
             this.lists[i] = new Node();
         }
+        this.nodePool = new Node();
 
         this.activeLists = new HashSet<>();
 
@@ -108,6 +113,14 @@ public final class CraBlock {
             sentinel.sentinel = null;
             this.lists[i] = null;
         }
+
+        var sentinel = this.nodePool;
+        while (sentinel.size > 0) {
+            sentinel.next.remove();
+        }
+        sentinel.next = null;
+        sentinel.prev = null;
+        sentinel.sentinel = null;
 
         data.clear();
         activeLists.clear();
@@ -256,16 +269,23 @@ public final class CraBlock {
     }
 
     private void addToList(EntryData entry, Node inSentinel) {
-        Node newNode = new Node(entry, inSentinel);
+        Node newNode = (this.nodePool.size > 0)
+                       ? this.nodePool.next.remove().setSentinel(inSentinel).setData(entry)
+                       : new Node(entry, inSentinel);
+
         data.put(entry.key(), newNode);
         newNode.appendToTail();
         newNode.data.recordOperation(currOp++);
+
         ++size;
     }
 
     public void remove(long key) {
         Node node = data.get(key);
         node.remove();
+        node.release();
+        node.setSentinel(this.nodePool);
+        node.appendToTail();
         data.remove(key);
         --size;
     }
@@ -413,6 +433,22 @@ public final class CraBlock {
             this.data = data;
         }
 
+        public EntryData release() {
+            var temp = this.data;
+            this.data = null;
+            return temp;
+        }
+
+        public Node setSentinel(Node sentinel) {
+            this.sentinel = sentinel;
+            return this;
+        }
+
+        public Node setData(EntryData data) {
+            this.data = data;
+            return this;
+        }
+
         /**
          * Appends the node to the tail of the list.
          */
@@ -437,7 +473,7 @@ public final class CraBlock {
         /**
          * Removes the node from the list.
          */
-        public void remove() {
+        public Node remove() {
             checkState(prev != null && next != null, "Node already detached");
             --sentinel.size;
 
@@ -446,6 +482,8 @@ public final class CraBlock {
 
             prev = null;
             next = null;
+
+            return this;
         }
 
         /**
