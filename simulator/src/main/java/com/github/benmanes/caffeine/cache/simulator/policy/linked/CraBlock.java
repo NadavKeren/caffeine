@@ -26,6 +26,7 @@ import com.google.common.base.MoreObjects;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
+import javax.annotation.Nullable;
 import java.util.*;
 import java.lang.System.Logger;
 
@@ -41,12 +42,12 @@ import static com.google.common.base.Preconditions.checkState;
 public final class CraBlock {
     final private static boolean DEBUG = true;
     final private static System.Logger logger = System.getLogger(CraBlock.class.getSimpleName());
+    private static final Node s_node_pool = new Node();
 
 
     private final Long2ObjectMap<Node> data;
     private final Node[] lists;
 
-    private final Node nodePool;
     private final Set<Integer> activeLists;
     private int maximumSize;
     private int size;
@@ -65,7 +66,6 @@ public final class CraBlock {
         for (int i = 0; i <= maxLists; i++) {
             this.lists[i] = new Node();
         }
-        this.nodePool = new Node();
 
         this.activeLists = new HashSet<>();
 
@@ -86,7 +86,6 @@ public final class CraBlock {
         for (int i = 0; i <= maxLists; i++) {
             this.lists[i] = new Node();
         }
-        this.nodePool = new Node();
 
         this.activeLists = new HashSet<>();
 
@@ -106,21 +105,14 @@ public final class CraBlock {
         for (int i = 0; i < maxLists; ++i) {
             var sentinel = this.lists[i];
             while (sentinel.size > 0) {
-                sentinel.next.remove();
+                releaseToNodePool(sentinel.next);
             }
+
             sentinel.next = null;
             sentinel.prev = null;
             sentinel.sentinel = null;
             this.lists[i] = null;
         }
-
-        var sentinel = this.nodePool;
-        while (sentinel.size > 0) {
-            sentinel.next.remove();
-        }
-        sentinel.next = null;
-        sentinel.prev = null;
-        sentinel.sentinel = null;
 
         data.clear();
         activeLists.clear();
@@ -269,9 +261,7 @@ public final class CraBlock {
     }
 
     private void addToList(EntryData entry, Node inSentinel) {
-        Node newNode = (this.nodePool.size > 0)
-                       ? this.nodePool.next.remove().setSentinel(inSentinel).setData(entry)
-                       : new Node(entry, inSentinel);
+        Node newNode = getNode(entry, inSentinel);
 
         data.put(entry.key(), newNode);
         newNode.appendToTail();
@@ -280,12 +270,25 @@ public final class CraBlock {
         ++size;
     }
 
+    private static void releaseToNodePool(Node node) {
+        node.remove()
+            .setSentinel(s_node_pool)
+            .setData(null)
+            .appendToTail();
+
+        node.release();
+    }
+
+    private static Node getNode(EntryData entry, Node inSentinel) {
+        return (s_node_pool.size > 0)
+               ? s_node_pool.next.remove().setSentinel(inSentinel).setData(entry)
+               : new Node(entry, inSentinel);
+
+    }
+
     public void remove(long key) {
         Node node = data.get(key);
-        node.remove();
-        node.release();
-        node.setSentinel(this.nodePool);
-        node.appendToTail();
+        releaseToNodePool(node);
         data.remove(key);
         --size;
     }
@@ -403,9 +406,9 @@ public final class CraBlock {
 
         Node sentinel;
         int size;
-        Node prev;
-        Node next;
-        EntryData data;
+        @Nullable Node prev;
+        @Nullable Node next;
+        @Nullable EntryData data;
 
         /**
          * Creates a new sentinel node.
@@ -445,6 +448,7 @@ public final class CraBlock {
         }
 
         public Node setData(EntryData data) {
+            Assert.assertCondition(this.data == null || data == null, "setting non-null data");
             this.data = data;
             return this;
         }
@@ -499,14 +503,19 @@ public final class CraBlock {
         }
 
         public AccessEvent event() {
+            Assert.assertCondition(data != null, "Fetching null data for item");
             return data.event();
         }
 
         public long key() {
+            Assert.assertCondition(data != null, "Fetching null data for item");
             return data.key();
         }
 
-        public EntryData data() {return data;}
+        public EntryData data() {
+            Assert.assertCondition(data != null, "Fetching null data for item");
+            return data;
+        }
 
         @Override
         public String toString() {
