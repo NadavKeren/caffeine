@@ -17,22 +17,32 @@ final public class BurstBlock {
     final private static boolean DEBUG = true;
     final private static Logger logger = System.getLogger(BurstBlock.class.getSimpleName());
     private SearchableMinimumHeap<Long, EntryData> heap;
-    private int maximumSize;
+    private int currentCapacity;
+    final private int maximalCapacity;
     private int fetchCounter;
     final private Comparator<Long> c;
 
-    public BurstBlock(int maximumSize, LatencyEstimator<Long> estimator) {
-        this.c = (l1, l2) -> (int)(estimator.getLatencyEstimation(l1) - estimator.getLatencyEstimation(l2));
-        this.heap = new SearchableMinimumHeap<>(maximumSize, this.c);
-        this.maximumSize = maximumSize;
+    public BurstBlock(int maximalCapacity, int currentCapacity, LatencyEstimator<Long> estimator) {
+        this.c = (l1, l2) -> (int) Math.round(estimator.getLatencyEstimation(l1) - estimator.getLatencyEstimation(l2));
+        this.heap = new SearchableMinimumHeap<>(maximalCapacity, currentCapacity, this.c);
+        this.currentCapacity = currentCapacity;
+        this.maximalCapacity = maximalCapacity;
         this.fetchCounter = 0;
     }
 
     public BurstBlock(BurstBlock other, String name) {
-        this.heap = new SearchableMinimumHeap<>(other.heap);
-        this.maximumSize = other.maximumSize;
-        this.fetchCounter = 0;
         this.c = other.c;
+        this.heap = new SearchableMinimumHeap<>(other.heap);
+        this.currentCapacity = other.currentCapacity;
+        this.maximalCapacity = other.maximalCapacity;
+        this.fetchCounter = 0;
+    }
+
+
+    public void copyInto(BurstBlock other) {
+        this.heap.copyInto(other.heap);
+        other.currentCapacity = this.currentCapacity;
+        other.fetchCounter = this.fetchCounter;
     }
 
     public void clear() {
@@ -62,18 +72,18 @@ final public class BurstBlock {
             expendedItems.add(new ObjectObjectImmutablePair<>(item.key(), item));
         }
 
-        this.maximumSize += amount;
+        this.currentCapacity += amount;
         this.heap.increaseSize(amount, expendedItems);
 
         if (DEBUG) {
-            logger.log(Logger.Level.INFO, ConsoleColors.infoString("BurstBlock: Increased by %d to %d", amount, this.maximumSize));
+            logger.log(Logger.Level.INFO, ConsoleColors.infoString("BurstBlock: Increased by %d to %d", amount, this.currentCapacity));
         }
     }
 
     public List<EntryData> decreaseSize(int amount) {
-        Assert.assertCondition(amount <= maximumSize, "Cannot lower the size below 0");
+        Assert.assertCondition(amount <= currentCapacity, "Cannot lower the size below 0");
         var items = this.heap.decreaseSize(amount);
-        maximumSize -= amount;
+        currentCapacity -= amount;
 
         List<EntryData> evicted = new ArrayList<>(items.size());
         for (Pair<Long, EntryData> item : items) {
@@ -81,7 +91,7 @@ final public class BurstBlock {
         }
 
         if (DEBUG) {
-            logger.log(Logger.Level.INFO, ConsoleColors.infoString("BurstBlock: Decreased by %d to %d", amount, this.maximumSize));
+            logger.log(Logger.Level.INFO, ConsoleColors.infoString("BurstBlock: Decreased by %d to %d", amount, this.currentCapacity));
         }
 
         return evicted;
@@ -106,7 +116,7 @@ final public class BurstBlock {
     }
 
     public EntryData getVictim() {
-        if (fetchCounter > 10 * maximumSize) {
+        if (fetchCounter > 10 * currentCapacity) {
             update();
         }
 
@@ -117,9 +127,9 @@ final public class BurstBlock {
         return c.compare(item.key(), getVictim().key());
     }
 
-    public boolean isFull() { return heap.size() == maximumSize; }
+    public boolean isFull() { return heap.size() == currentCapacity; }
 
-    public int capacity() { return this.maximumSize; }
+    public int capacity() { return this.currentCapacity; }
 
     public void dump() { heap.dump(); }
 
@@ -129,5 +139,10 @@ final public class BurstBlock {
 
     public void validate() {
         this.heap.validate();
+    }
+
+    public void setSize(int size) {
+        this.currentCapacity = size;
+        this.heap.setSize(size);
     }
 }

@@ -107,15 +107,18 @@ public final class CraBlock {
             while (sentinel.size > 0) {
                 releaseToNodePool(sentinel.next);
             }
-
-            sentinel.next = null;
-            sentinel.prev = null;
-            sentinel.sentinel = null;
-            this.lists[i] = null;
         }
 
         data.clear();
         activeLists.clear();
+        this.size = 0;
+    }
+
+    public void copyInto(CraBlock other) {
+        other.maximumSize = this.maximumSize;
+        other.size = 0;
+        other.currOp = this.currOp;
+        other.copyLists(this);
     }
 
     private void copyLists(CraBlock other) {
@@ -397,6 +400,12 @@ public final class CraBlock {
                                  name,
                                  size,
                                  data.size()));
+    }
+
+    public void setSize(int size) {
+        Assert.assertCondition(this.data.size() == 0 && size == 0,
+                               () -> String.format("CRA Block - Resetting size while there are items in the block: data.size() = %d, size = %d",
+                                                   this.data.size(), size));
     }
 
     /**

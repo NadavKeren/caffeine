@@ -144,6 +144,7 @@ public class AdaptivePipelineCache implements Policy {
                 break;
             case "BC":
                 block = new BurstCache(new UneditableLatencyEstimatorProxy<>(burstEstimator),
+                                       cacheCapacity,
                                        quantumSize,
                                        quota);
                 break;

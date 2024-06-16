@@ -71,7 +71,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                                            latencyEstimator,
                                            "probation-block");
         this.windowBlock = new CraBlock(decayFactor, maxLists, windowCapacity, latencyEstimator, "window-block");
-        this.burstBlock = new BurstBlock(burstCacheCapacity, burstEstimator);
+        this.burstBlock = new BurstBlock(cacheCapacity, burstCacheCapacity, burstEstimator);
 
         this.policyStats = new WindowCAWithBBStats("sketch.WindowCAWithBB (%.0f%%, %.0f%%, %.0f%%)",
                                                    (double) 100 * windowCapacity / cacheCapacity,
@@ -125,7 +125,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         this.protectedBlock = new CraBlock(decayFactor, maxLists, protectedSize, latencyEstimator, "protected-block");
         this.probationBlock = new CraBlock(decayFactor, maxLists, probationSize, latencyEstimator, "probation-block");
         this.windowBlock = new CraBlock(decayFactor, maxLists, windowSize, latencyEstimator, "window-block");
-        this.burstBlock = new BurstBlock(burstSize, burstEstimator);
+        this.burstBlock = new BurstBlock(cacheCapacity, burstSize, burstEstimator);
 
         this.normalizationBias = 0;
         this.normalizationFactor = 0;

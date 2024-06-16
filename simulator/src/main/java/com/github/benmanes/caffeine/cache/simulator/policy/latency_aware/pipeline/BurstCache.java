@@ -1,5 +1,6 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline;
 
+import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.BurstBlock;
@@ -11,10 +12,10 @@ public class BurstCache implements PipelineBlock {
     final private int quantumSize;
     final private BurstBlock block;
 
-    public BurstCache(LatencyEstimator<Long> burstEstimator, int quantumSize, int initialQuota) {
+    public BurstCache(LatencyEstimator<Long> burstEstimator, int maximalCapacity, int quantumSize, int initialQuota) {
         this.quantumSize = quantumSize;
 
-        block = new BurstBlock(initialQuota * quantumSize, burstEstimator);
+        block = new BurstBlock(maximalCapacity, initialQuota * quantumSize, burstEstimator);
     }
 
     private BurstCache(BurstCache other) {
@@ -25,6 +26,11 @@ public class BurstCache implements PipelineBlock {
     @Override
     public void clear() {
         this.block.clear();
+    }
+
+    @Override
+    public void setSize(int size) {
+        this.block.setSize(size);
     }
 
     @Override
@@ -57,6 +63,19 @@ public class BurstCache implements PipelineBlock {
         }
 
         return evicted;
+    }
+
+    @Override
+    public void copyInto(PipelineBlock other) {
+        Assert.assertCondition(other instanceof BurstCache,
+                               () -> String.format("Got wrong block type: expected: %s\tgot: %s",
+                                                   this.getClass().getSimpleName(),
+                                                   other.getClass().getSimpleName()));
+
+        BurstCache casted = (BurstCache) other;
+
+        Assert.assertCondition(casted.quantumSize == this.quantumSize, "copy fail: quantum size mismatch");
+        this.block.copyInto(casted.block);
     }
 
     @Override

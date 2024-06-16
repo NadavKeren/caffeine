@@ -37,7 +37,7 @@ public class PipelinePolicy implements Policy {
 
     final public static PipelinePolicy DUMMY = new DummyPipeline();
 
-    final private PolicyStats stats;
+    private PolicyStats stats;
     final private PipelineBlock[] blocks;
     final private int[] quota;
     final private BlockType[] types;
@@ -45,6 +45,8 @@ public class PipelinePolicy implements Policy {
     final private int blockCount;
     final private int quantumSize;
     final private int cacheCapacity;
+
+    private boolean isDummy = false;
 
     private double timeframePenalty = 0;
     private int timeframeOpCount = 0;
@@ -162,6 +164,26 @@ public class PipelinePolicy implements Policy {
         for (int i = 0; i < blockCount; ++i) {
             this.blocks[i].clear();
         }
+
+        isDummy = false;
+        stats = new PolicyStats(generatePipelineName());
+    }
+
+    public void makeDummy() {
+        isDummy = true;
+    }
+
+    public void copyInto(PipelinePolicy other) {
+        Assert.assertCondition(this.blockCount == other.blockCount,
+                               () -> String.format("pipeline size mismatch: this: %d\tother: %d",
+                                                   this.blockCount,
+                                                   other.blockCount));
+        int blockIdx = 0;
+        for (var block: this.blocks) {
+            block.copyInto(other.blocks[blockIdx]);
+            other.quota[blockIdx] = this.quota[blockIdx];
+            ++blockIdx;
+        }
     }
 
     public String generatePipelineName() {
@@ -199,6 +221,7 @@ public class PipelinePolicy implements Policy {
                 break;
             case "BC":
                 block = new BurstCache(new UneditableLatencyEstimatorProxy<>(burstEstimator),
+                                       cacheCapacity,
                                        quantumSize,
                                        quota);
                 break;
@@ -257,6 +280,10 @@ public class PipelinePolicy implements Policy {
 
     @Override
     public void record(AccessEvent event) {
+        if (isDummy) {
+            return;
+        }
+
         EntryData entry = null;
 
         if (opDumpWriter != null) {
@@ -407,6 +434,10 @@ public class PipelinePolicy implements Policy {
     }
 
     public double getTimeframeAveragePenalty() {
+        if (isDummy) {
+            return Double.MAX_VALUE;
+        }
+
         final double res = this.timeframePenalty / this.timeframeOpCount;
         this.timeframePenalty = 0;
         this.timeframeOpCount = 0;

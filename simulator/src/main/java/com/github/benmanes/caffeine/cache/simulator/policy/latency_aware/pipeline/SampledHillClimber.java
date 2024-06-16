@@ -82,6 +82,24 @@ public class SampledHillClimber implements Policy {
         }
     }
 
+    private void copyGhostCaches() {
+        for (var pair : ghostCaches) {
+            PipelinePolicy ghost = pair.first();
+            CacheDiff diff = pair.second();
+
+            ghost.clear();
+
+            sampledMainCache.copyInto(ghost);
+
+            if (ghost.canExtend(diff.incIdx) && ghost.canShrink(diff.decIdx)) {
+                ghost.moveQuantum(diff.incIdx, diff.decIdx);
+            } else {
+                ghost.makeDummy();
+            }
+        }
+
+    }
+
     @Override
     public void record(AccessEvent event) {
         this.mainPipeline.record(event);
@@ -156,7 +174,7 @@ public class SampledHillClimber implements Policy {
                 writer.flush();
             }
 
-            createGhostCaches();
+            copyGhostCaches();
         }
     }
 

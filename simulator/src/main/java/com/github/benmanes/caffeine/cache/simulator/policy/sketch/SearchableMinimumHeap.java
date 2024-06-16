@@ -27,27 +27,29 @@ public class SearchableMinimumHeap<K, V> {
     protected Map<K, V> valuesMap;
     protected Map<K, Integer> idxMap;
     protected int size;
+    protected int maxSize;
     protected Comparator<? super K> c;
 
     final private static boolean DEBUG = false;
 
-    public SearchableMinimumHeap(int capacity, Comparator<? super K> c) {
+    public SearchableMinimumHeap(int maximalCapacity, int capacity, Comparator<? super K> c) {
         this.c = c;
-        this.heap = (K[]) new Object[capacity];
-        this.valuesMap = new HashMap<>(capacity, DEFAULT_LOAD_FACTOR);
-        this.idxMap = new HashMap<>(capacity, DEFAULT_LOAD_FACTOR);
+        this.heap = (K[]) new Object[maximalCapacity];
+        this.valuesMap = new HashMap<>(maximalCapacity, DEFAULT_LOAD_FACTOR);
+        this.idxMap = new HashMap<>(maximalCapacity, DEFAULT_LOAD_FACTOR);
         this.size = 0;
+        this.maxSize = 0;
     }
 
     public SearchableMinimumHeap(SearchableMinimumHeap<K,V> other) {
         this. c = other.c;
-        int capacity = other.heap.length;
-        this.heap = (K[]) new Object[capacity];
+        int maximalCapacity = other.heap.length;
+        this.heap = (K[]) new Object[maximalCapacity];
 
-        this.valuesMap = new HashMap<>(capacity, DEFAULT_LOAD_FACTOR);
-        this.idxMap = new HashMap<>(capacity, DEFAULT_LOAD_FACTOR);
+        this.valuesMap = new HashMap<>(maximalCapacity, DEFAULT_LOAD_FACTOR);
+        this.idxMap = new HashMap<>(maximalCapacity, DEFAULT_LOAD_FACTOR);
 
-        int numItemsToMove = Math.min(capacity, other.size);
+        int numItemsToMove = Math.min(maximalCapacity, other.size);
         for (int i = 0; i < numItemsToMove; ++i) {
             K key = other.heap[i];
             V value = other.get(key);
@@ -58,8 +60,33 @@ public class SearchableMinimumHeap<K, V> {
         }
 
         this.size = other.size;
+        this.maxSize = other.maxSize;
 
         makeHeap();
+    }
+
+    public void copyInto(SearchableMinimumHeap<K, V> other) {
+        Assert.assertCondition(this.heap.length == other.heap.length,
+                               () -> String.format("copy fail: heap sizes mismatch, src: %d vs dst: %d",
+                                                   this.heap.length,
+                                                   other.heap.length));
+        other.c = this.c;
+        int maximalCapacity = this.heap.length;
+
+        int numItemsToMove = Math.min(maximalCapacity, this.size);
+        for (int i = 0; i < numItemsToMove; ++i) {
+            K key = this.heap[i];
+            V value = this.get(key);
+
+            other.heap[i] = key;
+            other.valuesMap.put(key, value);
+            other.idxMap.put(key, i);
+        }
+
+        other.size = this.size;
+        other.maxSize = this.maxSize;
+
+        other.makeHeap();
     }
 
     public void increaseSize(int amount, @Nullable List<Pair<K, V>> items) {
@@ -68,41 +95,33 @@ public class SearchableMinimumHeap<K, V> {
                                () -> String.format("Too many items offered: %d when increasing by: %d",
                                                    items.size(),
                                                    amount));
-        int newCapacity = heap.length + amount;
+        this.maxSize += amount;
 
-        K[] newHeap = (K[]) new Object[newCapacity];
-        Map<K, V> newValuesMap = new HashMap<>(newCapacity, DEFAULT_LOAD_FACTOR);
-        Map<K, Integer> newIdxMap = new HashMap<>(newCapacity, DEFAULT_LOAD_FACTOR);
-        int i = 0;
-        for (; i < size; ++i) {
-            K key = heap[i];
-            V value = get(key);
+        Assert.assertCondition(this.maxSize <= this.heap.length,
+                               () -> String.format("Exceeding the maximal capacity possible, current maximum: %d, maximal capacity: %d",
+                                                   this.maxSize,
+                                                   this.heap.length));
 
-            newHeap[i] = key;
-            newValuesMap.put(key, value);
-            newIdxMap.put(key, i);
-        }
-
+        int i = size;
         if (items != null) {
             for (Pair<K, V> itemPair : items) {
                 K key = itemPair.first();
-                newHeap[i] = key;
-                newValuesMap.put(key, itemPair.second());
-                newIdxMap.put(key, i);
+                heap[i] = key;
+                valuesMap.put(key, itemPair.second());
+                idxMap.put(key, i);
                 ++i;
             }
         }
-
-        this.heap = newHeap;
-        this.valuesMap = newValuesMap;
-        this.idxMap = newIdxMap;
         this.size += items.size();
 
         makeHeap();
         final int idx = i; // for lambda capture
         Assert.assertCondition((this.size == idx),
                                () -> String.format("Size mismatch; expected = %d, actual = %d", size, idx));
-        Assert.assertCondition(this.valuesMap.size() == size, () -> String.format("Class and map sizes mismatch; Class size: %d, Map size: %d", size, this.valuesMap.size()));
+        Assert.assertCondition(this.valuesMap.size() == size,
+                               () -> String.format("Class and map sizes mismatch; Class size: %d, Map size: %d",
+                                                   size,
+                                                   this.valuesMap.size()));
     }
 
     public List<Pair<K, V>> decreaseSize(int amount) {
@@ -116,6 +135,7 @@ public class SearchableMinimumHeap<K, V> {
             itemsRemoved.add(item);
         }
 
+        this.maxSize -= amount;
         validate();
 
         return itemsRemoved;
@@ -293,32 +313,6 @@ public class SearchableMinimumHeap<K, V> {
         }
     }
 
-//    private String heapToStringAndBoldAt(int pos) {
-//        StringBuilder sb = new StringBuilder();
-//        sb.append("[");
-//        for (int idx = 0; idx < size - 1; ++idx) {
-//            if (idx == pos) {
-//                sb.append(ConsoleColors.YELLOW_BOLD);
-//                sb.append(heap[idx]);
-//                sb.append(ConsoleColors.RESET);
-//            } else {
-//                sb.append(heap[idx]);
-//            }
-//            sb.append(", ");
-//        }
-//
-//        if (pos == size - 1) {
-//            sb.append(ConsoleColors.YELLOW_BOLD);
-//            sb.append(heap[size - 1]);
-//            sb.append(ConsoleColors.RESET);
-//        } else {
-//            sb.append(heap[size - 1]);
-//        }
-//        sb.append("]");
-//
-//        return sb.toString();
-//    }
-
     private PrintWriter prepareFileWriter() {
         LocalDateTime currentTime = LocalDateTime.now(ZoneId.systemDefault());
         DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("dd-MM-HH-mm-ss");
@@ -346,5 +340,9 @@ public class SearchableMinimumHeap<K, V> {
 
             writer.close();
         }
+    }
+
+    public void setSize(int size) {
+        this.maxSize = size;
     }
 }

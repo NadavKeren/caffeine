@@ -59,6 +59,28 @@ public class LruBlock implements PipelineBlock {
     }
 
     @Override
+    public void setSize(int size) {
+        this.block.setSize(size);
+    }
+
+    @Override
+    public void copyInto(PipelineBlock other) {
+        Assert.assertCondition(other instanceof LruBlock,
+                               () -> String.format("Got wrong block type: expected: %s\tgot: %s",
+                                                   this.getClass().getSimpleName(),
+                                                   other.getClass().getSimpleName()));
+        LruBlock casted = (LruBlock) other;
+
+        this.block.copyInto(casted.block);
+
+        casted.normalizationBias = this.normalizationBias;
+        casted.normalizationFactor = this.normalizationFactor;
+        casted.maxDelta = this.maxDelta;
+        casted.maxDeltaCounts = this.maxDeltaCounts;
+        casted.samplesCount = this.samplesCount;
+    }
+
+    @Override
     public PipelineBlock createCopy() {
         return new LruBlock(this);
     }

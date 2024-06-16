@@ -70,6 +70,8 @@ public class LfuBlock implements PipelineBlock {
             protectedBlock.increaseCapacity(quantumSize);
             probationBlock.appendItems(items);
         }
+
+        this.validate();
     }
 
     @Override
@@ -96,6 +98,8 @@ public class LfuBlock implements PipelineBlock {
             probationBlock.decreaseCapacity(quantumSize);
         }
 
+        this.validate();
+
         return items;
     }
 
@@ -110,9 +114,39 @@ public class LfuBlock implements PipelineBlock {
     }
 
     @Override
+    public void copyInto(PipelineBlock other) {
+        Assert.assertCondition(other instanceof LfuBlock,
+                               () -> String.format("Got wrong block type: expected: %s\tgot: %s",
+                                                   this.getClass().getSimpleName(),
+                                                   other.getClass().getSimpleName()));
+        LfuBlock casted = (LfuBlock) other;
+
+        this.protectedBlock.copyInto(casted.protectedBlock);
+        this.probationBlock.copyInto(casted.probationBlock);
+
+        Assert.assertCondition(this.protectedBlock.capacity() == casted.protectedBlock.capacity(), "protected size mismatch");
+        Assert.assertCondition(this.probationBlock.capacity() == casted.probationBlock.capacity(), "probation size mismatch");
+        casted.capacity = this.capacity;
+
+        casted.normalizationBias = this.normalizationBias;
+        casted.normalizationFactor = this.normalizationFactor;
+        casted.maxDelta = this.maxDelta;
+        casted.maxDeltaCounts = this.maxDeltaCounts;
+        casted.samplesCount = this.samplesCount;
+    }
+
+
+
+    @Override
     public void clear() {
         this.probationBlock.clear();
         this.protectedBlock.clear();
+    }
+
+    @Override
+    public void setSize(int size) {
+        this.probationBlock.setSize(size);
+        this.protectedBlock.setSize(size);
     }
 
     @Override
