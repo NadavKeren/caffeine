@@ -63,6 +63,7 @@ ext {
     univocityParsers: '2.9.1',
     ycsb: '0.17.0',
     xz: '1.9',
+    hash4j: '0.18.0',
     zstd: '1.5.2-3',
   ]
   testVersions = [
@@ -167,6 +168,7 @@ ext {
       transitive = false
     },
     xz: "org.tukaani:xz:${versions.xz}",
+    hash4j: "com.dynatrace.hash4j:hash4j:${versions.hash4j}",
     zstd: "com.github.luben:zstd-jni:${versions.zstd}",
   ]
   testLibraries = [

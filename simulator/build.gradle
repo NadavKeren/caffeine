@@ -36,6 +36,7 @@ dependencies {
   implementation libraries.commonsMath3
   implementation libraries.commonsCompress
   implementation libraries.univocityParsers
+  implementation libraries.hash4j
 
   testImplementation testLibraries.testng
 

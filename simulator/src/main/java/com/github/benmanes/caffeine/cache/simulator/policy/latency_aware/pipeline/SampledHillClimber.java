@@ -46,7 +46,8 @@ public class SampledHillClimber implements Policy {
         stats = new PolicyStats("Sampled " + sampleOrder + " " + mainPipeline.generatePipelineName());
         adaptionTimeframe = settings.adaptionMultiplier() * mainPipeline.cacheCapacity();
 
-        sampler = new FarmHashSampler(sampleOrder);
+//        sampler = new FarmHashSampler(sampleOrder); Testing xxHash3 to see if there is performance improvement, need to check if FarmHash allows for different seeds.
+        sampler = new XXH3Sampler(sampleOrder, settings.randomSeed());
         sampledMainCache = new PipelinePolicy(config, sampleOrder);
         final int numOfCaches = blockCount * (blockCount - 1);
         ghostCaches = new ArrayList<>(numOfCaches);
@@ -64,7 +65,6 @@ public class SampledHillClimber implements Policy {
         }
 
         ghostCaches.clear();
-
         int idx = 0;
         for (int inc = 0; inc < blockCount; ++inc) {
             for (int dec = 0; dec < blockCount; ++dec) {
