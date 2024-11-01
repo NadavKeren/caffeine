@@ -51,6 +51,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipelin
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.PipelinePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.SampleErrorTestPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.SampledHillClimber;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.RandomHillClimber;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.FrequentlyUsedPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.LinkedPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.MultiQueuePolicy;
@@ -74,7 +75,6 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowCostAwar
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.AdaptiveCAWithBurstBlockPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.HillClimberWindowTinyLfuPolicy;
-import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.AdaptivePipelineCache;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.feedback.FeedbackTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.feedback.FeedbackWindowTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.segment.FullySegmentedWindowTinyLfuPolicy;
@@ -140,6 +140,7 @@ public final class Registry {
     register(FullGhostHillClimber.class, FullGhostHillClimber::new);
     register(SampleErrorTestPolicy.class, SampleErrorTestPolicy::new);
     register(SampledHillClimber.class, SampledHillClimber::new);
+    register(RandomHillClimber.class, RandomHillClimber::new);
   }
 
   /** Registers the policy based on the annotated name. */
