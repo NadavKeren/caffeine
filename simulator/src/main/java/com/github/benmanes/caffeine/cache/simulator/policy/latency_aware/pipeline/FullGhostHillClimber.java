@@ -39,7 +39,7 @@ public class FullGhostHillClimber implements Policy {
         var hillClimberSettings = new FGHCSettings(config);
         mainPipeline = new PipelinePolicy(config);
         blockCount = mainPipeline.blockCount();
-        stats = new PolicyStats(mainPipeline.generatePipelineName());
+        stats = new PolicyStats("FGHC " + mainPipeline.generatePipelineName());
         adaptionTimeframe = (int) (hillClimberSettings.adaptionMultiplier()
                                    * mainPipeline.cacheCapacity());
 
