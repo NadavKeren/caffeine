@@ -22,7 +22,7 @@ import java.util.List;
 @Policy.PolicySpec(name = "latency-aware.RHC")
 public class RandomHillClimber implements Policy {
     private final static boolean DEBUG = true;
-    @Nullable private PrintWriter writer = null;
+    @Nullable private PrintWriter quotaDump = null;
 
     private final PipelinePolicy mainPipeline;
 
@@ -41,7 +41,7 @@ public class RandomHillClimber implements Policy {
                                    * mainPipeline.cacheCapacity());
 
         if (DEBUG) {
-             writer = prepareFileWriter();
+             quotaDump = prepareQuotaDump();
         }
     }
 
@@ -88,9 +88,9 @@ public class RandomHillClimber implements Policy {
             var currState = this.mainPipeline.getCurrentState();
             var currCacheState = new CacheState(eventNum, currState.quotas, this.mainPipeline.stats().averagePenalty());
 
-            if (DEBUG && writer != null) {
-                writer.println(currCacheState.toString());
-                writer.flush();
+            if (DEBUG && quotaDump != null) {
+                quotaDump.println(currCacheState.toString());
+                quotaDump.flush();
             }
         }
     }
@@ -100,12 +100,12 @@ public class RandomHillClimber implements Policy {
         return stats;
     }
 
-    private PrintWriter prepareFileWriter() {
+    private PrintWriter prepareQuotaDump() {
         LocalDateTime currentTime = LocalDateTime.now(ZoneId.systemDefault());
         DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("dd-MM-HH-mm-ss");
         PrintWriter writer = null;
         try {
-            FileWriter fwriter = new FileWriter("/tmp/RHC-" + currentTime.format(timeFormatter) + ".dump", StandardCharsets.UTF_8);
+            FileWriter fwriter = new FileWriter("/tmp/RHC-" + currentTime.format(timeFormatter) + ".quota-dump", StandardCharsets.UTF_8);
             writer = new PrintWriter(fwriter);
         } catch (IOException e) {
             System.err.println("Error creating the log file handler");
@@ -118,8 +118,8 @@ public class RandomHillClimber implements Policy {
 
     @Override
     public void dump() {
-        if (DEBUG && writer != null) {
-            writer.close();
+        if (DEBUG && quotaDump != null) {
+            quotaDump.close();
         }
     }
 

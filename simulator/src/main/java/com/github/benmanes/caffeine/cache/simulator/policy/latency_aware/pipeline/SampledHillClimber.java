@@ -24,7 +24,7 @@ import java.util.ArrayList;
 @Policy.PolicySpec(name = "latency-aware.SampledHillClimber")
 public class SampledHillClimber implements Policy {
     private final static boolean DEBUG = true;
-    @Nullable private PrintWriter writer = null;
+    @Nullable private PrintWriter quotaDump = null;
 
     private final PipelinePolicy mainPipeline;
     private final LongSampler sampler;
@@ -55,7 +55,7 @@ public class SampledHillClimber implements Policy {
         createGhostCaches();
 
         if (DEBUG) {
-            writer = prepareFileWriter();
+            quotaDump = prepareQuotaDump();
         }
     }
 
@@ -169,9 +169,9 @@ public class SampledHillClimber implements Policy {
                                                        Arrays.toString(currState.quotas),
                                                        Arrays.toString(sampledState.quotas)));
 
-            if (DEBUG && writer != null) {
-                writer.println(printFormatState(eventNum, currState.quotas, currentAvg));
-                writer.flush();
+            if (DEBUG && quotaDump != null) {
+                quotaDump.println(printFormatState(eventNum, currState.quotas, currentAvg));
+                quotaDump.flush();
             }
 
             copyGhostCaches();
@@ -199,12 +199,12 @@ public class SampledHillClimber implements Policy {
         return stats;
     }
 
-    private PrintWriter prepareFileWriter() {
+    private PrintWriter prepareQuotaDump() {
         LocalDateTime currentTime = LocalDateTime.now(ZoneId.systemDefault());
         DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("dd-MM-HH-mm-ss");
         PrintWriter writer = null;
         try {
-            FileWriter fwriter = new FileWriter("/tmp/SHC-O" + sampleOrder + "-T-" + currentTime.format(timeFormatter) + ".dump", StandardCharsets.UTF_8);
+            FileWriter fwriter = new FileWriter("/tmp/SHC-O" + sampleOrder + "-T-" + currentTime.format(timeFormatter) + ".quota-dump", StandardCharsets.UTF_8);
             writer = new PrintWriter(fwriter);
         } catch (IOException e) {
             System.err.println("Error creating the log file handler");
@@ -217,8 +217,8 @@ public class SampledHillClimber implements Policy {
 
     @Override
     public void dump() {
-        if (DEBUG && writer != null) {
-            writer.close();
+        if (DEBUG && quotaDump != null) {
+            quotaDump.close();
         }
     }
 
