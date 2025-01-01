@@ -130,7 +130,7 @@ public final class CraBlock {
                 curr = curr.next;
 
                 for (int j = 0; j < other.lists[i].size(); ++j) {
-                    Node copy = new Node(curr.data(), this.lists[i].sentinel);
+                    Node copy = getNode(curr.data(), this.lists[i].sentinel);
                     copy.appendToHead();
                     data.put(copy.key(), copy);
                     ++size;
