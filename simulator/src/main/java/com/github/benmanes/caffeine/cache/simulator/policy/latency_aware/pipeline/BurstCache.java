@@ -12,7 +12,7 @@ public class BurstCache implements PipelineBlock {
     final private int quantumSize;
     final private BurstBlock block;
 
-    public BurstCache(LatencyEstimator<Long> burstEstimator, int maximalCapacity, int quantumSize, int initialQuota) {
+    public BurstCache(LatencyEstimator burstEstimator, int maximalCapacity, int quantumSize, int initialQuota) {
         this.quantumSize = quantumSize;
 
         block = new BurstBlock(maximalCapacity, initialQuota * quantumSize, burstEstimator);

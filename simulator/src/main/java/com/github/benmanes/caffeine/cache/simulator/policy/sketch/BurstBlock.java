@@ -5,26 +5,27 @@ import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.ConsoleColors;
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import it.unimi.dsi.fastutil.Pair;
-import it.unimi.dsi.fastutil.objects.ObjectObjectImmutablePair;
+import it.unimi.dsi.fastutil.longs.LongComparator;
+import it.unimi.dsi.fastutil.longs.LongObjectImmutablePair;
+import it.unimi.dsi.fastutil.longs.LongObjectPair;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.lang.System.Logger;
 
 final public class BurstBlock {
     final private static boolean DEBUG = true;
     final private static Logger logger = System.getLogger(BurstBlock.class.getSimpleName());
-    private SearchableMinimumHeap<Long, EntryData> heap;
+    private SearchableMinimumHeap<EntryData> heap;
     private int currentCapacity;
     final private int maximalCapacity;
     private int fetchCounter;
-    final private Comparator<Long> c;
+    final private LongComparator c;
 
-    public BurstBlock(int maximalCapacity, int currentCapacity, LatencyEstimator<Long> estimator) {
+    public BurstBlock(int maximalCapacity, int currentCapacity, LatencyEstimator estimator) {
         this.c = (l1, l2) -> (int) Math.round(estimator.getLatencyEstimation(l1) - estimator.getLatencyEstimation(l2));
-        this.heap = new SearchableMinimumHeap<>(maximalCapacity, currentCapacity, this.c);
+        this.heap = new SearchableMinimumHeap<>(maximalCapacity, this.c);
         this.currentCapacity = currentCapacity;
         this.maximalCapacity = maximalCapacity;
         this.fetchCounter = 0;
@@ -67,9 +68,9 @@ final public class BurstBlock {
     }
 
     public void increaseSize(int amount, List<EntryData> items) {
-        List<Pair<Long, EntryData>> expendedItems = new ArrayList<>(items.size());
+        List<LongObjectPair<EntryData>> expendedItems = new ArrayList<>(items.size());
         for (EntryData item : items) {
-            expendedItems.add(new ObjectObjectImmutablePair<>(item.key(), item));
+            expendedItems.add(new LongObjectImmutablePair<>(item.key(), item));
         }
 
         this.currentCapacity += amount;

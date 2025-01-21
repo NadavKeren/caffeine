@@ -37,7 +37,7 @@ public final class LATinyLfu implements Admittor {
 
   private final PolicyStats policyStats;
   private final Frequency sketch;
-  private LatencyEstimator<Long> latencyEstimator;
+  private LatencyEstimator latencyEstimator;
 
   private static final boolean DEBUG = false;
 
@@ -46,7 +46,7 @@ public final class LATinyLfu implements Admittor {
     Admittor.super.record(key);
   }
 
-  public LATinyLfu(Config config, PolicyStats policyStats, LatencyEstimator<Long> latencyEstimator) {
+  public LATinyLfu(Config config, PolicyStats policyStats, LatencyEstimator latencyEstimator) {
     this.policyStats = policyStats;
     this.sketch = makeSketch(config);
     this.latencyEstimator = latencyEstimator;

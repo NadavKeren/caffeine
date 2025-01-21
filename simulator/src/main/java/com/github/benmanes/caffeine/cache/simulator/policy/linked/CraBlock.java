@@ -56,10 +56,10 @@ public final class CraBlock {
     private final double decayFactor;
     private final int maxLists;
     private int currOp;
-    private final LatencyEstimator<Long> latencyEstimator;
+    private final LatencyEstimator latencyEstimator;
     final private String name;
 
-    public CraBlock(double decayFactor, int maxLists, int maximumSize, LatencyEstimator<Long> latencyEstimator, String name) {
+    public CraBlock(double decayFactor, int maxLists, int maximumSize, LatencyEstimator latencyEstimator, String name) {
         this.data = new Long2ObjectOpenHashMap<>();
 
         this.lists = new Node[maxLists + 1];
@@ -94,7 +94,7 @@ public final class CraBlock {
 
         this.decayFactor = other.decayFactor;
         this.currOp = other.currOp;
-        this.latencyEstimator = new UneditableLatencyEstimatorProxy<>(other.latencyEstimator);
+        this.latencyEstimator = new UneditableLatencyEstimatorProxy(other.latencyEstimator);
         this.name = name;
 
         this.normalizationBias = other.normalizationBias;

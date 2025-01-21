@@ -40,8 +40,8 @@ public class AdaptivePipelineCache implements Policy {
     final private int adaptionTimeframe;
     private int opsSinceAdaption = 0;
     final int blockCount;
-    final private LatencyEstimator<Long> latencyEstimator;
-    final private LatencyEstimator<Long> burstEstimator;
+    final private LatencyEstimator latencyEstimator;
+    final private LatencyEstimator burstEstimator;
     final PipelineBlock[] blocks;
     final int[] blockQuotas;
     final String[] types;
@@ -71,10 +71,11 @@ public class AdaptivePipelineCache implements Policy {
 
         final var blockConfigs = settings.blocksConfigs();
         types = new String[blockCount];
-        latencyEstimator = new LatestLatencyEstimator<>();
-        burstEstimator = new MovingAverageBurstLatencyEstimator<>(settings.agingWindowSize(),
-                                                                  settings.ageSmoothFactor(),
-                                                                  settings.numOfPartitions());
+        latencyEstimator = new LatestLatencyEstimator();
+        burstEstimator = new MovingAverageBurstLatencyEstimator(settings.agingWindowSize(),
+                                                                settings.ageSmoothFactor(),
+                                                                settings.numOfPartitions(),
+                                                                this.cacheCapacity);
 
 //        final int ghostSize = settings.ghostSize();
 
@@ -138,12 +139,12 @@ public class AdaptivePipelineCache implements Policy {
         switch (type) {
             case "LRU":
                 block = new LruBlock(blockConfig,
-                                     new UneditableLatencyEstimatorProxy<>(latencyEstimator),
+                                     new UneditableLatencyEstimatorProxy(latencyEstimator),
                                      quantumSize,
                                      quota);
                 break;
             case "BC":
-                block = new BurstCache(new UneditableLatencyEstimatorProxy<>(burstEstimator),
+                block = new BurstCache(new UneditableLatencyEstimatorProxy(burstEstimator),
                                        cacheCapacity,
                                        quantumSize,
                                        quota);

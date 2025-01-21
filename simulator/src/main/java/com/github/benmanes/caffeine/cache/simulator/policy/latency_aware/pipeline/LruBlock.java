@@ -14,7 +14,7 @@ public class LruBlock implements PipelineBlock {
     final private int quantumSize;
     final private CraBlock block;
 
-    private LatencyEstimator<Long> latencyEstimator;
+    private LatencyEstimator latencyEstimator;
 
     protected double normalizationBias = 0;
     protected double normalizationFactor = 0;
@@ -22,7 +22,7 @@ public class LruBlock implements PipelineBlock {
     protected int maxDeltaCounts = 0;
     protected int samplesCount = 0;
 
-    public LruBlock(Config config, LatencyEstimator<Long> latencyEstimator, int quantumSize, int initialQuota) {
+    public LruBlock(Config config, LatencyEstimator latencyEstimator, int quantumSize, int initialQuota) {
         this.quantumSize = quantumSize;
         this.latencyEstimator = latencyEstimator;
 

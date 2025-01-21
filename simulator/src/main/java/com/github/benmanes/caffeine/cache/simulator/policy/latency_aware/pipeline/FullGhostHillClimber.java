@@ -14,16 +14,13 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 @Policy.PolicySpec(name = "latency-aware.FGHC")
 public class FullGhostHillClimber implements Policy {
-    private final static boolean DEBUG = true;
+    private final static boolean DUMP_QUOTAS = true;
     @Nullable private PrintWriter quotaDump = null;
 
     private final PipelinePolicy mainPipeline;
@@ -49,8 +46,8 @@ public class FullGhostHillClimber implements Policy {
         createGhostCaches();
 
 
-        if (DEBUG) {
-             quotaDump = prepareQuotaDump();
+        if (DUMP_QUOTAS) {
+             prepareQuotaDump();
         }
     }
 
@@ -139,7 +136,7 @@ public class FullGhostHillClimber implements Policy {
             var currState = this.mainPipeline.getCurrentState();
             var currCacheState = new CacheState(eventNum, currState.quotas, currentAvg);
 
-            if (DEBUG && quotaDump != null) {
+            if (DUMP_QUOTAS && quotaDump != null) {
                 quotaDump.println(currCacheState.toString());
                 quotaDump.flush();
             }
@@ -153,25 +150,22 @@ public class FullGhostHillClimber implements Policy {
         return stats;
     }
 
-    private PrintWriter prepareQuotaDump() {
-        LocalDateTime currentTime = LocalDateTime.now(ZoneId.systemDefault());
-        DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("dd-MM-HH-mm-ss");
-        PrintWriter writer = null;
+    private void prepareQuotaDump() {
+        String currentDir = System.getProperty("user.dir");
+        System.out.println("Output quota at: " + currentDir);
         try {
-            FileWriter fwriter = new FileWriter("/tmp/FGHC-" + currentTime.format(timeFormatter) + ".quota-dump", StandardCharsets.UTF_8);
-            writer = new PrintWriter(fwriter);
+            FileWriter fwriter = new FileWriter(currentDir + "/FGHC.quota-dump", StandardCharsets.UTF_8);
+            quotaDump = new PrintWriter(fwriter);
         } catch (IOException e) {
             System.err.println("Error creating the log file handler");
             e.printStackTrace();
             System.exit(1);
         }
-
-        return writer;
     }
 
     @Override
     public void dump() {
-        if (DEBUG && quotaDump != null) {
+        if (DUMP_QUOTAS && quotaDump != null) {
             quotaDump.close();
         }
     }

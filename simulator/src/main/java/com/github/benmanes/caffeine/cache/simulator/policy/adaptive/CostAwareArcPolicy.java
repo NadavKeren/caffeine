@@ -52,7 +52,7 @@ public final class CostAwareArcPolicy implements Policy {
     private final Long2ObjectMap<Entry> data;
     private final PolicyStats policyStats;
     private final int maximumSize;
-    private LatencyEstimator<Long> latencyEstimator;
+    private LatencyEstimator latencyEstimator;
 
     private final CraBlock headT1;
     private final CraBlock headT2;
@@ -75,7 +75,7 @@ public final class CostAwareArcPolicy implements Policy {
         this.maximumSize = Ints.checkedCast(settings.maximumSize());
         this.policyStats = new PolicyStats(name());
         this.data = new Long2ObjectOpenHashMap<>();
-        this.latencyEstimator = new LatestLatencyEstimator<>();
+        this.latencyEstimator = new LatestLatencyEstimator();
         this.headT1 = new CraBlock(1, 10, this.maximumSize, latencyEstimator, "T1");
         this.headT2 = new CraBlock(1, 10, this.maximumSize, latencyEstimator, "T2");
         this.headB1 = new CraBlock(1, 10, this.maximumSize, latencyEstimator, "B1");

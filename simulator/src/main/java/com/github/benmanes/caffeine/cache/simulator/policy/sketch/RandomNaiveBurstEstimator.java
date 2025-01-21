@@ -2,7 +2,7 @@ package com.github.benmanes.caffeine.cache.simulator.policy.sketch;
 
 import static com.google.common.base.Preconditions.checkState;
 
-public class RandomNaiveBurstEstimator<KeyType> extends NaiveBurstLatencyEstimator<KeyType> {
+public class RandomNaiveBurstEstimator extends NaiveBurstLatencyEstimator {
     private double prob;
 
     public RandomNaiveBurstEstimator(double prob) {
@@ -12,7 +12,7 @@ public class RandomNaiveBurstEstimator<KeyType> extends NaiveBurstLatencyEstimat
     }
 
     @Override
-    public double getLatencyEstimation(KeyType key) {
+    public double getLatencyEstimation(long key) {
         double randNum = Math.random();
         return randNum < prob ? 0 : super.getLatencyEstimation(key);
     }

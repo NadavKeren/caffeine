@@ -1,14 +1,14 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch;
 
+import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
 import static com.google.common.base.Preconditions.checkState;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Map;
-import java.util.HashMap;
 import java.util.logging.*;
 import java.time.ZoneId;
 
@@ -22,46 +22,60 @@ import java.time.ZoneId;
  * Smoothing Factor = alpha
  *
  */
-public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstimator<KeyType> {
+public class MovingAverageBurstLatencyEstimator implements LatencyEstimator {
     private static Logger logger = null;
     final private static boolean DEBUG = false;
     final private static int INITIAL_SIZE = 1000000;
-    final private static float LOAD_FACTOR = 2.0f;
-    protected Map<KeyType, Entry> storedValues;
+    final private static float LOAD_FACTOR = 0.875f;
+    final protected Long2ObjectOpenHashMap<Entry> storedValues;
     final protected long agingWindowSize;
     final protected double ageSmoothingFactor;
     final protected int numOfPartitions;
+    final protected int maxSize;
 
     private double hitPenalty;
 
-    public MovingAverageBurstLatencyEstimator(long agingWindowSize, double ageSmoothingFactor, int numOfPartitions) {
-        storedValues = new HashMap<>(INITIAL_SIZE, LOAD_FACTOR);
+    public MovingAverageBurstLatencyEstimator(long agingWindowSize, double ageSmoothingFactor, int numOfPartitions, int maxSize) {
+        storedValues = new Long2ObjectOpenHashMap<>(INITIAL_SIZE, LOAD_FACTOR);
+        storedValues.defaultReturnValue(null);
 
         checkState(numOfPartitions > 0, "Illegal number of Partitions");
         this.agingWindowSize = agingWindowSize;
         this.ageSmoothingFactor = ageSmoothingFactor;
         this.numOfPartitions = numOfPartitions;
         this.hitPenalty = 1;
+        this.maxSize = maxSize;
 
         if (DEBUG) {
-            System.out.println(String.format("Aging-window: %d ASF: %.4f partitions: %d", agingWindowSize, ageSmoothingFactor, numOfPartitions));
+            System.out.printf("Aging-window: %d ASF: %.4f partitions: %d%n", agingWindowSize, ageSmoothingFactor, numOfPartitions);
             setLogger();
         }
     }
 
     @Override
-    public void record(KeyType key, double value, double recordTime) {
+    public void record(long key, double value, double recordTime) {
         storedValues.put(key, new Entry(key, value, recordTime));
+
+        Assert.assertCondition(storedValues.size() <= maxSize + 1, () -> String.format("There are more stored values (%d) than the max cache size: %d", storedValues.size(), maxSize));
     }
 
     @Override
-    public void addValueToRecord(KeyType key, double value, double recordTime) {
+    public void addValueToRecord(long key, double value, double recordTime) {
         Entry entry = storedValues.get(key);
         if (entry == null) {
             throw new IllegalArgumentException(String.format("Key %s was not present during update attempt", key));
         }
 
         entry.addArrival(value, recordTime);
+    }
+
+    @Override
+    public void remove(long key) {
+        Assert.assertCondition(storedValues.containsKey(key), () -> String.format("Trying to remove non-existing key: %d", key));
+        storedValues.remove(key);
+
+        Assert.assertCondition(!storedValues.containsKey(key), () -> String.format("The key %d should be removed", key));
+        Assert.assertCondition(storedValues.size() <= maxSize, () -> String.format("The size of stored values is %d", storedValues.size()));
     }
 
     @Override
@@ -75,23 +89,24 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
     }
 
     @Override
-    public double getLatencyEstimation(KeyType key) {
+    public double getLatencyEstimation(long key) {
         var entry = storedValues.get(key);
         return entry != null ? entry.getValue() : 0;
     }
 
     @Override
-    public double getLatencyEstimation(KeyType key, double time) {
+    public double getLatencyEstimation(long key, double time) {
         Entry entry = storedValues.get(key);
-        if (entry == null) {
-            return 0;
-        }
+        return entry != null ? entry.getValue(time) : 0;
+    }
 
-        return entry.getValue(time);
+    @Override
+    public int size() {
+        return this.storedValues.size();
     }
 
     protected class Entry {
-        final KeyType key;
+        final long key;
         final private int[] arrivalCounters;
         final private double latency;
         private double lastTickTime;
@@ -104,7 +119,7 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
         private long updateNum;
 
 
-        public Entry(KeyType key, double latency, double currTime) {
+        public Entry(long key, double latency, double currTime) {
             this.key = key;
             this.arrivalCounters = new int[numOfPartitions];
             arrivalCounters[0] = 1;
@@ -134,7 +149,7 @@ public class MovingAverageBurstLatencyEstimator<KeyType> implements LatencyEstim
         private void updateValue(double time) {
             if (DEBUG) {
                 logger.warning(String.format("%s, %d, %.2f, %.2f%n",
-                                             key.toString(),
+                                             key,
                                              updateNum++,
                                              value,
                                              maxValueInWindow));

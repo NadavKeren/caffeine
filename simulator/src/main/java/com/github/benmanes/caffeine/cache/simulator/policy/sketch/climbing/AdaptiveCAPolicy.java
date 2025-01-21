@@ -56,7 +56,7 @@ public final class AdaptiveCAPolicy implements Policy {
   private final double initialPercentMain;
   private final PolicyStats policyStats;
   private final LAHillClimber climber;
-  private final LatencyEstimator<Long> latencyEstimator;
+  private final LatencyEstimator latencyEstimator;
   private final Admittor admittor;
   private final int cacheCapacity;
 
@@ -120,21 +120,21 @@ public final class AdaptiveCAPolicy implements Policy {
     this.timeframeOpCount = 0;
   }
 
-  private LatencyEstimator<Long> createEstimator(Config config) {
+  private LatencyEstimator createEstimator(Config config) {
     BasicSettings settings = new BasicSettings(config);
     BasicSettings.LatencyEstimationSettings latencySettings = settings.latencyEstimationSettings();
     String estimationType = latencySettings.estimationType();
 
-    LatencyEstimator<Long> estimator;
+    LatencyEstimator estimator;
     switch (estimationType) {
       case "latest":
-        estimator = new LatestLatencyEstimator<>();
+        estimator = new LatestLatencyEstimator();
         break;
       case "true-average":
-        estimator = new TrueAverageEstimator<>();
+        estimator = new TrueAverageEstimator();
         break;
       case "buckets":
-        estimator = new BucketLatencyEstimation<>(latencySettings.numOfBuckets(), latencySettings.epsilon());
+        estimator = new BucketLatencyEstimation(latencySettings.numOfBuckets(), latencySettings.epsilon());
         break;
       default:
         throw new IllegalStateException("Unknown estimator type: " + estimationType);

@@ -12,6 +12,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.LatestLatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.MovingAverageBurstLatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.MovingAverageWithSketchBurstEstimator;
+import com.tangosol.util.AssertionException;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigException;
 
@@ -53,13 +54,12 @@ public class PipelinePolicy implements Policy {
 
     @Nullable private PrintWriter dumper = null;
     @Nullable private PrintWriter opDumpWriter = null;
-    @Nullable private PrintWriter evictionDumpWriter = null;
 
     /*
      * TODO: nkeren: consult Ben regarding how to share these with only one party making the updates.
      */
-    final private LatencyEstimator<Long> latencyEstimator;
-    private LatencyEstimator<Long> burstEstimator;
+    private LatencyEstimator latencyEstimator;
+    private LatencyEstimator burstEstimator;
 
     private PipelinePolicy() {
         this.stats = null;
@@ -97,9 +97,8 @@ public class PipelinePolicy implements Policy {
 
         blocks = new PipelineBlock[blockCount];
 
-        latencyEstimator = new LatestLatencyEstimator<>();
-        createBurstEstimator(settings);
-        Assert.assertCondition(burstEstimator != null, "The burst estimator should have been initialized");
+        latencyEstimator = new LatestLatencyEstimator();
+        burstEstimator = createBurstEstimator(settings);
 
         final var blockConfigs = settings.blocksConfigs();
 
@@ -118,28 +117,30 @@ public class PipelinePolicy implements Policy {
         stats = new PolicyStats(generatePipelineName());
 
         try {
-            FileWriter fileWriter = new FileWriter("/tmp/pipeline-ops.dump", Charset.defaultCharset());
-            opDumpWriter = new PrintWriter(fileWriter);
-            fileWriter = new FileWriter("/tmp/pipeline-evictions.dump", Charset.defaultCharset());
-            evictionDumpWriter = new PrintWriter(fileWriter);
-
             if (DEBUG) {
-                FileWriter file = new FileWriter("/tmp/pipeline.dump", Charset.defaultCharset());
+                FileWriter fileWriter = new FileWriter("/home/nadav/caching/pipeline-ops.dump", Charset.defaultCharset());
+                opDumpWriter = new PrintWriter(fileWriter);
+                opDumpWriter.println();
+
+                FileWriter file = new FileWriter("/home/nadav/caching/pipeline.dump", Charset.defaultCharset());
                 dumper = new PrintWriter(file);
+                dumper.println();
             }
         } catch (IOException exception) {
             Assert.assertCondition(false, "Got an I/O error on opening the dumpfiles: " + exception.getCause());
         }
     }
 
-    private void createBurstEstimator(PipelineSettings settings) {
+    private LatencyEstimator createBurstEstimator(PipelineSettings settings) {
         String type = settings.burstEstimationType();
+        LatencyEstimator burstEstimator;
 
         switch (type) {
             case "normal" :
-                burstEstimator = new MovingAverageBurstLatencyEstimator<>(settings.agingWindowSize(),
-                                                                          settings.ageSmoothFactor(),
-                                                                          settings.numOfPartitions());
+                burstEstimator = new MovingAverageBurstLatencyEstimator(settings.agingWindowSize(),
+                                                                        settings.ageSmoothFactor(),
+                                                                        settings.numOfPartitions(),
+                                                                        this.cacheCapacity);
                 break;
             case "sketch":
                 burstEstimator = new MovingAverageWithSketchBurstEstimator(settings.agingWindowSize(),
@@ -149,12 +150,15 @@ public class PipelinePolicy implements Policy {
                                                                            settings.confidence(),
                                                                            settings.randomSeed(),
                                                                            settings.agingWindowSize() * this.cacheCapacity,
-                                                                           settings.ageSmoothFactor());
+                                                                           settings.ageSmoothFactor(),
+                                                                           this.cacheCapacity);
                 break;
             default:
                 Assert.assertCondition(false, "No such estimation type");
-                break;
+                throw new AssertionException();
         }
+
+        return burstEstimator;
     }
 
     public static Policy policy(Config config) {
@@ -165,6 +169,9 @@ public class PipelinePolicy implements Policy {
         for (int i = 0; i < blockCount; ++i) {
             this.blocks[i].clear();
         }
+
+        latencyEstimator = null;
+        burstEstimator = null;
 
         isDummy = false;
         stats = new PolicyStats(generatePipelineName());
@@ -216,12 +223,12 @@ public class PipelinePolicy implements Policy {
         switch (type) {
             case "LRU":
                 block = new LruBlock(blockConfig,
-                                     new UneditableLatencyEstimatorProxy<>(latencyEstimator),
+                                     new UneditableLatencyEstimatorProxy(latencyEstimator),
                                      quantumSize,
                                      quota);
                 break;
             case "BC":
-                block = new BurstCache(new UneditableLatencyEstimatorProxy<>(burstEstimator),
+                block = new BurstCache(new UneditableLatencyEstimatorProxy(burstEstimator),
                                        cacheCapacity,
                                        quantumSize,
                                        quota);
@@ -229,7 +236,7 @@ public class PipelinePolicy implements Policy {
             case "LFU":
                 block = new LfuBlock(generalConfig,
                                      blockConfig,
-                                     new UneditableLatencyEstimatorProxy<>(latencyEstimator),
+                                     new UneditableLatencyEstimatorProxy(latencyEstimator),
                                      quantumSize,
                                      quota);
 
@@ -255,14 +262,13 @@ public class PipelinePolicy implements Policy {
         this.timeframeOpCount = 0;
         this.dumper = null;
         this.opDumpWriter = null;
-        this.evictionDumpWriter = null;
 
         this.blocks = new PipelineBlock[blockCount];
         this.types = new BlockType[blockCount];
         this.quota = new int[blockCount];
 
-        this.latencyEstimator = new UneditableLatencyEstimatorProxy<>(source.latencyEstimator);
-        this.burstEstimator = new UneditableLatencyEstimatorProxy<>(source.burstEstimator);
+        this.latencyEstimator = new UneditableLatencyEstimatorProxy(source.latencyEstimator);
+        this.burstEstimator = new UneditableLatencyEstimatorProxy(source.burstEstimator);
 
         for (int i = 0; i < blockCount; ++i) {
             blocks[i] = source.blocks[i].createCopy();
@@ -288,7 +294,7 @@ public class PipelinePolicy implements Policy {
         EntryData entry = null;
 
         if (opDumpWriter != null) {
-            opDumpWriter.println(ConsoleColors.colorString("event: " + event.eventNum(), ConsoleColors.WHITE_BOLD));
+            opDumpWriter.print(ConsoleColors.colorString(String.format("event: \t%d\t", event.eventNum()), ConsoleColors.WHITE_BOLD));
         }
 
         for (int idx = 0; idx < blockCount; ++idx) {
@@ -304,8 +310,9 @@ public class PipelinePolicy implements Policy {
             if (entry == null && blockRes != null) {
                 entry = blockRes;
 
-                if (DEBUG) {
-                    opDumpWriter.println(event.key() + " in " + types[idx]);
+                if (DEBUG && opDumpWriter != null && dumper != null) {
+                    opDumpWriter.println(event.key() + " found in " + types[idx]);
+                    dumper.println(event.eventNum() + " in cache");
                 }
             }
         }
@@ -344,32 +351,30 @@ public class PipelinePolicy implements Policy {
     private void insertionProcess(EntryData newItem) {
         var eventNum = newItem.event().eventNum();
         if (opDumpWriter != null) {
-            opDumpWriter.println(ConsoleColors.minorInfoString("Inserting %d", newItem.event().key()));
+            opDumpWriter.println(ConsoleColors.colorString("not found", ConsoleColors.WHITE_BOLD));
         }
+
+        final int totalSizeBeforeInsertion = Arrays.stream(blocks).mapToInt(PipelineBlock::size).sum();
 
         for (int idx = 0; idx < blockCount; ++idx) {
             if (newItem != null) {
                 if (dumper != null) {
-                    dumper.print(eventNum + " "
-                                 + types[idx].toString() + ": "
+                    dumper.print(eventNum + "\t"
+                                 + types[idx].toString() + ":\t"
                                  + newItem.key() + " -> ");
                 }
 
                 newItem = blocks[idx].insert(newItem);
 
-                if (DEBUG && dumper == null) {
+                if (DEBUG) {
                     debugPrint(idx, newItem, eventNum);
                 }
-
-                if (dumper != null) {
-                    if (newItem != null) {
-                        dumper.println(newItem.key());
-                    } else {
-                        dumper.println("null");
-                        dumper.println("---------------");
-                    }
-                }
             }
+        }
+
+        if (DEBUG && dumper != null) {
+            dumper.println("-------------------------------------------------------");
+            dumper.flush();
         }
 
         if (newItem != null) {
@@ -377,32 +382,25 @@ public class PipelinePolicy implements Policy {
             latencyEstimator.remove(newItem.key());
             burstEstimator.remove(newItem.key());
 
-            if (dumper != null) {
-                dumper.println("---------------");
-            }
+            Assert.assertCondition(latencyEstimator.size() <= cacheCapacity,
+                                   () -> String.format("The latency estimator size is bigger than the cache size: %d", latencyEstimator.size()));
+            Assert.assertCondition(burstEstimator.size() <= cacheCapacity,
+                                   () -> String.format("The burst estimator size is bigger than the cache size: %d", burstEstimator.size()));
+        } else {
+            Assert.assertCondition(totalSizeBeforeInsertion < cacheCapacity, () -> String.format("The total size %d before the insertion is the cache-capacity %d, and the removed item is null", totalSizeBeforeInsertion, cacheCapacity));
         }
     }
 
     private void debugPrint(int idx, @Nullable EntryData item, int eventNum) {
-        if (opDumpWriter == null || evictionDumpWriter == null) {
-            throw new RuntimeException("Should not get to debugPrint with empty dumpers");
+        if (dumper == null) {
+            return;
         }
 
-        if (item != null) {
-            opDumpWriter.println(ConsoleColors.colorString(types[idx] + " -> ", ConsoleColors.YELLOW)
-                                 + ConsoleColors.colorString(String.valueOf(item.key()),
-                                                             ConsoleColors.CYAN));
-            evictionDumpWriter.println(ConsoleColors.colorString(String.valueOf(eventNum), ConsoleColors.PURPLE) + " " +
-                                       ConsoleColors.colorString(types[idx] + " -> ", ConsoleColors.YELLOW)
-                                       + ConsoleColors.colorString(String.valueOf(item),
-                                                                   ConsoleColors.CYAN));
-        } else {
-            opDumpWriter.println(ConsoleColors.colorString(types[idx] + " -> ", ConsoleColors.YELLOW)
-                                 + ConsoleColors.colorString("null", ConsoleColors.CYAN));
-            evictionDumpWriter.println(ConsoleColors.colorString(String.valueOf(eventNum), ConsoleColors.PURPLE) + " " +
-                                       ConsoleColors.colorString(types[idx] + " -> ", ConsoleColors.YELLOW)
-                                       + ConsoleColors.colorString("null", ConsoleColors.CYAN));
-        }
+        String itemStr = item == null
+                       ? ConsoleColors.colorString("null", ConsoleColors.PURPLE)
+                       : ConsoleColors.colorString(String.valueOf(item.key()), ConsoleColors.CYAN);
+
+        dumper.println(eventNum + ":\t" + ConsoleColors.colorString(types[idx] + " -> ", ConsoleColors.YELLOW) + itemStr);
     }
 
     private void recordAccordingToAvailability(EntryData entry, AccessEvent currEvent) {

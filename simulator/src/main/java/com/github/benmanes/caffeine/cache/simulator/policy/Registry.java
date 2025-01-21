@@ -219,7 +219,6 @@ public final class Registry {
     registerMany(GhostHillClimberTinyLfuPolicy.class, GhostHillClimberTinyLfuPolicy::policies);
     registerMany(AdaptiveCAPolicy.class, AdaptiveCAPolicy::policies);
     register(AdaptiveCAWithBurstBlockPolicy.class, AdaptiveCAWithBurstBlockPolicy::policy);
-    register(AdaptivePipelineCache.class, AdaptivePipelineCache::new);
 
     register(TinyCachePolicy.class, TinyCachePolicy::new);
     register(WindowTinyCachePolicy.class, WindowTinyCachePolicy::new);

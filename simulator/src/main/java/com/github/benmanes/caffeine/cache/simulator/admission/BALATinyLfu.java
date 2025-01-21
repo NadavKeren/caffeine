@@ -39,8 +39,8 @@ public final class BALATinyLfu implements Admittor {
 
   private final PolicyStats policyStats;
   private final Frequency sketch;
-  private LatencyEstimator<Long> latencyEstimator;
-  private LatencyEstimator<Long> burstEstimator;
+  private LatencyEstimator latencyEstimator;
+  private LatencyEstimator burstEstimator;
   private double burstScoreWeight;
 
   @Override
@@ -50,8 +50,8 @@ public final class BALATinyLfu implements Admittor {
 
   public BALATinyLfu(Config config,
                      PolicyStats policyStats,
-                     LatencyEstimator<Long> latencyEstimator,
-                     LatencyEstimator<Long> burstEstimator,
+                     LatencyEstimator latencyEstimator,
+                     LatencyEstimator burstEstimator,
                      double burstScoreWeight) {
     this.policyStats = policyStats;
     this.sketch = makeSketch(config);

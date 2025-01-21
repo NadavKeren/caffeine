@@ -1,23 +1,21 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch;
 
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
+import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 
-import java.util.HashMap;
-import java.util.Map;
-
-public class LatestLatencyEstimator<KeyType> implements LatencyEstimator<KeyType> {
+public class LatestLatencyEstimator implements LatencyEstimator {
     private final static int INITIAL_SIZE = 1000000;
-    private final static float LOAD_FACTOR = 2.0f;
-    final private Map<KeyType, Double> storedValues;
+    private final static float LOAD_FACTOR = 0.875f;
+    final private Long2DoubleOpenHashMap storedValues;
 
     private double hitPenalty = 1;
 
     public LatestLatencyEstimator() {
-        this.storedValues = new HashMap<>(INITIAL_SIZE, LOAD_FACTOR);
+        this.storedValues = new Long2DoubleOpenHashMap(INITIAL_SIZE, LOAD_FACTOR);
     }
 
     @Override
-    public void record(KeyType key, double value, double recordTime) {
+    public void record(long key, double value, double recordTime) {
         storedValues.put(key, value);
     }
 
@@ -32,8 +30,17 @@ public class LatestLatencyEstimator<KeyType> implements LatencyEstimator<KeyType
     }
 
     @Override
-    public double getLatencyEstimation(KeyType key) {
-        Double estimate = storedValues.get(key);
-        return estimate != null ? estimate : getCacheHitEstimation();
+    public double getLatencyEstimation(long key) {
+        return storedValues.containsKey(key) ? storedValues.get(key) : getCacheHitEstimation();
+    }
+
+    @Override
+    public void remove(long key) {
+        this.storedValues.remove(key);
+    }
+
+    @Override
+    public int size() {
+        return this.storedValues.size();
     }
 }

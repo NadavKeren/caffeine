@@ -22,7 +22,7 @@ public class LfuBlock implements PipelineBlock {
     final private CraBlock probationBlock;
     private int capacity;
 
-    private LatencyEstimator<Long> latencyEstimator;
+    private LatencyEstimator latencyEstimator;
 
     protected double normalizationBias = 0;
     protected double normalizationFactor = 0;
@@ -32,7 +32,7 @@ public class LfuBlock implements PipelineBlock {
 
     public LfuBlock(Config config,
                     Config blockConfig,
-                    LatencyEstimator<Long> latencyEstimator,
+                    LatencyEstimator latencyEstimator,
                     int quantumSize,
                     int initialQuota) {
         this.quantumSize = quantumSize;
@@ -230,28 +230,30 @@ public class LfuBlock implements PipelineBlock {
         EntryData evicted = null;
         final int sizeBefore = size();
 
-        if (capacity > 0) {
-            if (probationBlock.size() + protectedBlock.size() >= capacity) {
-                EntryData victim = probationBlock.findVictim();
-                Assert.assertCondition(victim != data, "Got the same item");
-                boolean shouldAdmit = admittor.admit(data.key(), victim.key());
+        if (capacity == 0) {
+            return data;
+        }
 
-                if (shouldAdmit) {
-                    evicted = probationBlock.removeVictim();
-                    probationBlock.addEntry(data);
-                } else {
-                    evicted = data;
-                }
-            } else {
+        if (probationBlock.size() + protectedBlock.size() >= capacity) {
+            EntryData victim = probationBlock.findVictim();
+            Assert.assertCondition(victim != data, "Got the same item");
+            boolean shouldAdmit = admittor.admit(data.key(), victim.key());
+
+            if (shouldAdmit) {
+                evicted = probationBlock.removeVictim();
                 probationBlock.addEntry(data);
+            } else {
+                evicted = data;
             }
+        } else {
+            probationBlock.addEntry(data);
         }
 
         Assert.assertCondition(protectedBlock.size() <= protectedBlock.capacity()
                                && probationBlock.size() + protectedBlock.size() <= this.capacity(),
                                "LFU: Size overflow");
 
-        Assert.assertCondition(sizeBefore < capacity() || capacity() == 0 || evicted != null, "Got no evicted item when the cache is full");
+        Assert.assertCondition(sizeBefore < capacity() || evicted != null, "Got no evicted item when the cache is full");
 
         return evicted;
     }

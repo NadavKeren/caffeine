@@ -82,7 +82,7 @@ tasks.named('run').configure {
     it.getKey().startsWith('akka') || it.getKey().startsWith('caffeine')
   }
 
-  jvmArgs '-XX:+UseParallelGC', '-Xmx4g'
+  jvmArgs '-XX:+UseParallelGC', '-Xmx12g'
   if (project.hasProperty('jvmArgs')) {
     jvmArgs project.jvmArgs.split(',')
   }

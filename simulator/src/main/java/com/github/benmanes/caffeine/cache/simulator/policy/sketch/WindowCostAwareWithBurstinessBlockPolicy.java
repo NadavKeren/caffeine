@@ -26,8 +26,8 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
     private final static boolean DEBUG = false;
     @Nullable private PrintWriter dumper = null;
     protected WindowCAWithBBStats policyStats;
-    protected final LatencyEstimator<Long> latencyEstimator;
-    protected final LatencyEstimator<Long> burstEstimator;
+    protected final LatencyEstimator latencyEstimator;
+    protected final LatencyEstimator burstEstimator;
     protected final Admittor admittor;
     protected final int cacheCapacity;
 
@@ -139,8 +139,8 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                                                     int probationSize,
                                                     int protectedSize,
                                                     int burstSize,
-                                                    LatencyEstimator<Long> latencyEstimator,
-                                                    LatencyEstimator<Long> burstEstimator,
+                                                    LatencyEstimator latencyEstimator,
+                                                    LatencyEstimator burstEstimator,
                                                     Admittor admittor,
                                                     CraBlock otherWindow,
                                                     CraBlock otherProtected,
@@ -183,20 +183,20 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         this.burstBlock = null;
     }
 
-    private LatencyEstimator<Long> createLatencyEstimator(WindowCAWithBBSettings settings) {
+    private LatencyEstimator createLatencyEstimator(WindowCAWithBBSettings settings) {
         BasicSettings.LatencyEstimationSettings latencySettings = settings.latencyEstimationSettings();
         String estimationType = latencySettings.estimationType();
 
-        LatencyEstimator<Long> estimator;
+        LatencyEstimator estimator;
         switch (estimationType) {
             case "latest":
-                estimator = new LatestLatencyEstimator<>();
+                estimator = new LatestLatencyEstimator();
                 break;
             case "true-average":
-                estimator = new TrueAverageEstimator<>();
+                estimator = new TrueAverageEstimator();
                 break;
             case "buckets":
-                estimator = new BucketLatencyEstimation<>(latencySettings.numOfBuckets(), latencySettings.epsilon());
+                estimator = new BucketLatencyEstimation(latencySettings.numOfBuckets(), latencySettings.epsilon());
                 break;
             default:
                 throw new IllegalStateException("Unknown estimator type: " + estimationType);
@@ -210,20 +210,21 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         return estimator;
     }
 
-    private LatencyEstimator<Long> createBurstEstimator(WindowCAWithBBSettings settings) {
-        LatencyEstimator<Long> estimator;
+    private LatencyEstimator createBurstEstimator(WindowCAWithBBSettings settings) {
+        LatencyEstimator estimator;
         String strategy = settings.burstEstimationStrategy();
         switch (strategy) {
             case "naive":
-                estimator = new NaiveBurstLatencyEstimator<>();
+                estimator = new NaiveBurstLatencyEstimator();
                 break;
             case "moving-average":
-                estimator = new MovingAverageBurstLatencyEstimator<>(settings.agingWindowSize(),
-                                                                     settings.ageSmoothFactor(),
-                                                                     settings.numOfPartitions());
+                estimator = new MovingAverageBurstLatencyEstimator(settings.agingWindowSize(),
+                                                                   settings.ageSmoothFactor(),
+                                                                   settings.numOfPartitions(),
+                                                                   this.cacheCapacity);
                 break;
             case "random":
-                estimator = new RandomNaiveBurstEstimator<>(0.05);
+                estimator = new RandomNaiveBurstEstimator(0.05);
                 break;
             default:
                 throw new IllegalStateException("Unknown strategy: " + strategy);

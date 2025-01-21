@@ -41,7 +41,7 @@ import static java.lang.System.Logger;
 public final class WindowCAPolicy implements Policy {
 
   private final PolicyStats policyStats;
-  private final LatencyEstimator<Long> latencyEstimator;
+  private final LatencyEstimator latencyEstimator;
   private final Admittor admittor;
   private final long cacheCapacity;
 
@@ -78,21 +78,21 @@ public final class WindowCAPolicy implements Policy {
     this.samplesCount = 0;
   }
 
-  private LatencyEstimator<Long> createEstimator(Config config) {
+  private LatencyEstimator createEstimator(Config config) {
     BasicSettings settings = new BasicSettings(config);
     BasicSettings.LatencyEstimationSettings latencySettings = settings.latencyEstimationSettings();
     String estimationType = latencySettings.estimationType();
 
-    LatencyEstimator<Long> estimator;
+    LatencyEstimator estimator;
     switch (estimationType) {
       case "latest":
-        estimator = new LatestLatencyEstimator<>();
+        estimator = new LatestLatencyEstimator();
         break;
       case "true-average":
-        estimator = new TrueAverageEstimator<>();
+        estimator = new TrueAverageEstimator();
         break;
       case "buckets":
-        estimator = new BucketLatencyEstimation<>(latencySettings.numOfBuckets(), latencySettings.epsilon());
+        estimator = new BucketLatencyEstimation(latencySettings.numOfBuckets(), latencySettings.epsilon());
         break;
       default:
         throw new IllegalStateException("Unknown estimator type: " + estimationType);

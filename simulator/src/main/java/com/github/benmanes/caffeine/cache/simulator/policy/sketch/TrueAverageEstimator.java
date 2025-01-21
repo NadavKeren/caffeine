@@ -1,25 +1,23 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch;
 
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
-
-import java.util.HashMap;
-import java.util.Map;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
 import static java.lang.System.Logger;
 
-public class TrueAverageEstimator<KeyType> implements LatencyEstimator<KeyType> {
+public class TrueAverageEstimator implements LatencyEstimator {
     private static int INITIAL_SIZE = 1000000;
-    private static float LOAD_FACTOR = 2.0f;
-    private Map<KeyType, AccumulatedValues> storedValues;
+    private static float LOAD_FACTOR = 0.875f;
+    private Long2ObjectOpenHashMap<AccumulatedValues> storedValues;
 
     private static final Logger logger = System.getLogger(LatencyEstimator.class.getName());
 
     public TrueAverageEstimator() {
-        storedValues = new HashMap<>(INITIAL_SIZE, LOAD_FACTOR);
+        storedValues = new Long2ObjectOpenHashMap<>(INITIAL_SIZE, LOAD_FACTOR);
     }
 
     @Override
-    public void record(KeyType key, double value, double recordTime) {
+    public void record(long key, double value, double recordTime) {
         AccumulatedValues acc = storedValues.get(key);
 
         logger.log(Logger.Level.DEBUG, String.format("Recording key %s", key));
@@ -33,7 +31,7 @@ public class TrueAverageEstimator<KeyType> implements LatencyEstimator<KeyType> 
     }
 
     @Override
-    public double getLatencyEstimation(KeyType key) {
+    public double getLatencyEstimation(long key) {
         return storedValues.get(key).getAverage();
     }
 
