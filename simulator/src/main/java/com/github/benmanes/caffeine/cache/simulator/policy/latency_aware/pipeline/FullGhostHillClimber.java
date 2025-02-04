@@ -152,7 +152,6 @@ public class FullGhostHillClimber implements Policy {
 
     private void prepareQuotaDump() {
         String currentDir = System.getProperty("user.dir");
-        System.out.println("Output quota at: " + currentDir);
         try {
             FileWriter fwriter = new FileWriter(currentDir + "/FGHC.quota-dump", StandardCharsets.UTF_8);
             quotaDump = new PrintWriter(fwriter);

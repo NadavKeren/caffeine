@@ -58,8 +58,8 @@ public class PipelinePolicy implements Policy {
     /*
      * TODO: nkeren: consult Ben regarding how to share these with only one party making the updates.
      */
-    private LatencyEstimator latencyEstimator;
-    private LatencyEstimator burstEstimator;
+    final private LatencyEstimator latencyEstimator;
+    final private LatencyEstimator burstEstimator;
 
     private PipelinePolicy() {
         this.stats = null;
@@ -169,9 +169,6 @@ public class PipelinePolicy implements Policy {
         for (int i = 0; i < blockCount; ++i) {
             this.blocks[i].clear();
         }
-
-        latencyEstimator = null;
-        burstEstimator = null;
 
         isDummy = false;
         stats = new PolicyStats(generatePipelineName());
@@ -301,14 +298,8 @@ public class PipelinePolicy implements Policy {
             // Not stopping after item is found in order to let all blocks perform bookkeeping
             blocks[idx].bookkeeping(event.key());
 
-            EntryData blockRes = null;
             if (entry == null) {
-                blockRes = blocks[idx].getEntry(event.key());
-            }
-
-
-            if (entry == null && blockRes != null) {
-                entry = blockRes;
+                entry = blocks[idx].getEntry(event.key());
 
                 if (DEBUG && opDumpWriter != null && dumper != null) {
                     opDumpWriter.println(event.key() + " found in " + types[idx]);

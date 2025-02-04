@@ -11,9 +11,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -41,7 +38,7 @@ public class RandomHillClimber implements Policy {
                                    * mainPipeline.cacheCapacity());
 
         if (DEBUG) {
-             quotaDump = prepareQuotaDump();
+             prepareQuotaDump();
         }
     }
 
@@ -89,7 +86,7 @@ public class RandomHillClimber implements Policy {
             var currCacheState = new CacheState(eventNum, currState.quotas, this.mainPipeline.stats().averagePenalty());
 
             if (DEBUG && quotaDump != null) {
-                quotaDump.println(currCacheState.toString());
+                quotaDump.println(currCacheState);
                 quotaDump.flush();
             }
         }
@@ -100,20 +97,16 @@ public class RandomHillClimber implements Policy {
         return stats;
     }
 
-    private PrintWriter prepareQuotaDump() {
-        LocalDateTime currentTime = LocalDateTime.now(ZoneId.systemDefault());
-        DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("dd-MM-HH-mm-ss");
-        PrintWriter writer = null;
+    private void prepareQuotaDump() {
+        String currentDir = System.getProperty("user.dir");
         try {
-            FileWriter fwriter = new FileWriter("/tmp/RHC-" + currentTime.format(timeFormatter) + ".quota-dump", StandardCharsets.UTF_8);
-            writer = new PrintWriter(fwriter);
+            FileWriter fwriter = new FileWriter(currentDir + "/RHC.quota-dump", StandardCharsets.UTF_8);
+            quotaDump = new PrintWriter(fwriter);
         } catch (IOException e) {
             System.err.println("Error creating the log file handler");
             e.printStackTrace();
             System.exit(1);
         }
-
-        return writer;
     }
 
     @Override

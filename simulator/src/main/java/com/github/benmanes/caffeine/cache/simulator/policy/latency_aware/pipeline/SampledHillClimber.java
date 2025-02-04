@@ -14,9 +14,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
@@ -46,7 +43,6 @@ public class SampledHillClimber implements Policy {
         stats = new PolicyStats("Sampled " + sampleOrder + " " + mainPipeline.generatePipelineName());
         adaptionTimeframe = settings.adaptionMultiplier() * mainPipeline.cacheCapacity();
 
-//        sampler = new FarmHashSampler(sampleOrder); Testing xxHash3 to see if there is performance improvement, need to check if FarmHash allows for different seeds.
         sampler = new XXH3Sampler(sampleOrder, settings.randomSeed());
         sampledMainCache = new PipelinePolicy(config, sampleOrder);
         final int numOfCaches = blockCount * (blockCount - 1);
@@ -55,7 +51,7 @@ public class SampledHillClimber implements Policy {
         createGhostCaches();
 
         if (DEBUG) {
-            quotaDump = prepareQuotaDump();
+            prepareQuotaDump();
         }
     }
 
@@ -199,20 +195,16 @@ public class SampledHillClimber implements Policy {
         return stats;
     }
 
-    private PrintWriter prepareQuotaDump() {
-        LocalDateTime currentTime = LocalDateTime.now(ZoneId.systemDefault());
-        DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("dd-MM-HH-mm-ss");
-        PrintWriter writer = null;
+    private void prepareQuotaDump() {
+        String currentDir = System.getProperty("user.dir");
         try {
-            FileWriter fwriter = new FileWriter("/tmp/SHC-O" + sampleOrder + "-T-" + currentTime.format(timeFormatter) + ".quota-dump", StandardCharsets.UTF_8);
-            writer = new PrintWriter(fwriter);
+            FileWriter fwriter = new FileWriter(currentDir + "/SHC-O" + sampleOrder + ".quota-dump", StandardCharsets.UTF_8);
+            quotaDump = new PrintWriter(fwriter);
         } catch (IOException e) {
             System.err.println("Error creating the log file handler");
             e.printStackTrace();
             System.exit(1);
         }
-
-        return writer;
     }
 
     @Override

@@ -74,7 +74,7 @@ import akka.actor.typed.javadsl.Receive;
  * @author ben.manes@gmail.com (Ben Manes)
  */
 public final class Simulator extends AbstractBehavior<Simulator.Command> {
-  private final static boolean DEBUG = true;
+  private final static boolean DEBUG = false;
   private final static Level loggingLevel = Level.ALL;
   private final List<ActorRef<PolicyActor.Command>> policies;
   private final TraceReader traceReader;
