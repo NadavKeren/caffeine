@@ -224,11 +224,11 @@ public class PipelinePolicy implements Policy {
                                      quantumSize,
                                      quota);
                 break;
-            case "BC":
-                block = new BurstCache(new UneditableLatencyEstimatorProxy(burstEstimator),
-                                       cacheCapacity,
-                                       quantumSize,
-                                       quota);
+            case "LBU":
+                block = new LBUBlock(new UneditableLatencyEstimatorProxy(burstEstimator),
+                                     cacheCapacity,
+                                     quantumSize,
+                                     quota);
                 break;
             case "LFU":
                 block = new LfuBlock(generalConfig,

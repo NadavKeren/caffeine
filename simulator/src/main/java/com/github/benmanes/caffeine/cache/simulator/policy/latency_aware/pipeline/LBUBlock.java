@@ -8,19 +8,19 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.BurstBlock;
 import javax.annotation.Nullable;
 import java.util.List;
 
-public class BurstCache implements PipelineBlock {
+public class LBUBlock implements PipelineBlock {
     final private int quantumSize;
     final private BurstBlock block;
 
-    public BurstCache(LatencyEstimator burstEstimator, int maximalCapacity, int quantumSize, int initialQuota) {
+    public LBUBlock(LatencyEstimator burstEstimator, int maximalCapacity, int quantumSize, int initialQuota) {
         this.quantumSize = quantumSize;
 
         block = new BurstBlock(maximalCapacity, initialQuota * quantumSize, burstEstimator);
     }
 
-    private BurstCache(BurstCache other) {
+    private LBUBlock(LBUBlock other) {
         this.quantumSize = other.quantumSize;
-        this.block = new BurstBlock(other.block, "BC copy");
+        this.block = new BurstBlock(other.block, "LBU copy");
     }
 
     @Override
@@ -47,7 +47,7 @@ public class BurstCache implements PipelineBlock {
 
     @Override
     public PipelineBlock createCopy() {
-        return new BurstCache(this);
+        return new LBUBlock(this);
     }
 
     private @Nullable EntryData addToCacheIfBetter(EntryData item) {
@@ -68,11 +68,12 @@ public class BurstCache implements PipelineBlock {
     @Override
     public void copyInto(PipelineBlock other) {
         Assert.assertCondition(other instanceof BurstCache,
+        Assert.assertCondition(other instanceof LBUBlock,
                                () -> String.format("Got wrong block type: expected: %s\tgot: %s",
                                                    this.getClass().getSimpleName(),
                                                    other.getClass().getSimpleName()));
 
-        BurstCache casted = (BurstCache) other;
+        LBUBlock casted = (LBUBlock) other;
 
         Assert.assertCondition(casted.quantumSize == this.quantumSize, "copy fail: quantum size mismatch");
         this.block.copyInto(casted.block);

@@ -144,10 +144,10 @@ public class AdaptivePipelineCache implements Policy {
                                      quota);
                 break;
             case "BC":
-                block = new BurstCache(new UneditableLatencyEstimatorProxy(burstEstimator),
-                                       cacheCapacity,
-                                       quantumSize,
-                                       quota);
+                block = new LBUBlock(new UneditableLatencyEstimatorProxy(burstEstimator),
+                                     cacheCapacity,
+                                     quantumSize,
+                                     quota);
                 break;
             case "LFU":
                 block = new LfuBlock(generalConfig, blockConfig, latencyEstimator, quantumSize, quota);
