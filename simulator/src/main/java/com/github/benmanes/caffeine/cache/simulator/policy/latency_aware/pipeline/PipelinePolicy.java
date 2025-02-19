@@ -54,6 +54,8 @@ public class PipelinePolicy implements Policy {
     @Nullable private PrintWriter dumper = null;
     @Nullable private PrintWriter opDumpWriter = null;
 
+    @Nullable final private ExtendedStats extendedStats;
+
     /*
      * TODO: nkeren: consult Ben regarding how to share these with only one party making the updates.
      */
@@ -71,6 +73,7 @@ public class PipelinePolicy implements Policy {
         this.cacheCapacity = 0;
         this.latencyEstimator = null;
         this.burstEstimator = null;
+        this.extendedStats = null;
     }
 
     /***
@@ -114,6 +117,8 @@ public class PipelinePolicy implements Policy {
         }
 
         stats = new PolicyStats(generatePipelineName());
+
+        extendedStats = new ExtendedStats(burstEstimator, blocks[0].type());
 
         try {
             if (DEBUG) {
@@ -278,6 +283,7 @@ public class PipelinePolicy implements Policy {
         }
 
         stats = new PolicyStats("Copy of " + generatePipelineName());
+        extendedStats = null;
     }
 
     public PipelinePolicy createCopy() {
@@ -333,6 +339,9 @@ public class PipelinePolicy implements Policy {
             }
         }
 
+        if (extendedStats != null) {
+            extendedStats.recordEvent(event);
+        }
     }
 
     @Override
@@ -479,6 +488,10 @@ public class PipelinePolicy implements Policy {
             opDumpWriter.flush();
             opDumpWriter.close();
         }
+
+        if (extendedStats != null) {
+            extendedStats.printStats();
+        }
     }
 
     public PipelineState getCurrentState() {
@@ -613,6 +626,122 @@ public class PipelinePolicy implements Policy {
         @Override
         public boolean canShrink(int idx) {
             return false;
+        }
+    }
+
+    private static class ExtendedStats {
+        final static private int NUM_OF_RECENCY = 250000;
+        final static private int NUM_OF_FREQUENCY = 100;
+        final static private int NUM_OF_BURSTY = 100;
+
+        final static private int START_KEY_OF_FREQ = NUM_OF_RECENCY;
+        final static private int START_KEY_OF_BURSTY = START_KEY_OF_FREQ + NUM_OF_FREQUENCY;
+        final static private int START_OF_ONE_HIT_WONDERS = START_KEY_OF_BURSTY + NUM_OF_BURSTY;
+
+        private long recencyHits = 0;
+        private long frequencyHits = 0;
+        private long burstyHits = 0;
+        private double recencyLatency = 0d;
+        private double frequencyLatency = 0d;
+        private double burstyLatency = 0d;
+        private long recencyReqs = 0;
+        private long frequencyReqs = 0;
+        private long burstyReqs = 0;
+
+        private double burstScoresOfRec = 0d;
+        private double burstScoresOfFreq = 0d;
+        private double burstScoresOfBursty = 0d;
+
+        final private String type;
+
+        private UneditableLatencyEstimatorProxy burstEstimator;
+
+        public ExtendedStats(LatencyEstimator burstEstimator, String type) {
+            this.burstEstimator = new UneditableLatencyEstimatorProxy(burstEstimator);
+            this.type = type;
+        }
+
+        public void recordEvent(AccessEvent event) {
+            long key = event.key();
+            recordRequest(key);
+            AccessEvent.EventStatus status = event.getStatus();
+            if (status == AccessEvent.EventStatus.HIT) {
+                recordHit(key);
+            } else {
+                double latency =
+                        status == AccessEvent.EventStatus.MISS ? event.missPenalty() : event.delayedHitPenalty();
+                Assert.assertCondition(latency >= 0, () -> String.format("Bad latency: %.2f", latency));
+                recordLatency(key, latency);
+            }
+        }
+
+        private void recordHit(long key) {
+            if (key < START_KEY_OF_FREQ) {
+                ++recencyHits;
+            } else if (key < START_KEY_OF_BURSTY) {
+                ++frequencyHits;
+            } else if (key < START_OF_ONE_HIT_WONDERS) {
+                ++burstyHits;
+            }
+        }
+
+        private void recordRequest(long key) {
+            if (key < START_KEY_OF_FREQ) {
+                ++recencyReqs;
+            } else if (key < START_KEY_OF_BURSTY) {
+                ++frequencyReqs;
+            } else if (key < START_OF_ONE_HIT_WONDERS) {
+                ++burstyReqs;
+            }
+        }
+
+        private void recordLatency(long key, double value) {
+            if (key < START_KEY_OF_FREQ) {
+                recencyLatency += value;
+            } else if (key < START_KEY_OF_BURSTY) {
+                frequencyLatency += value;
+            } else if (key < START_OF_ONE_HIT_WONDERS) {
+                burstyLatency += value;
+            }
+        }
+
+        private void aggregateBurstScores() {
+            for (int key = 0; key < START_KEY_OF_FREQ; ++key) {
+                burstScoresOfRec += burstEstimator.getLatencyEstimation(key);
+            }
+
+            for (int key = START_KEY_OF_FREQ; key < START_KEY_OF_BURSTY; ++key) {
+                burstScoresOfFreq += burstEstimator.getLatencyEstimation(key);
+            }
+
+            for (int key = START_KEY_OF_BURSTY; key < START_OF_ONE_HIT_WONDERS; ++key) {
+                burstScoresOfBursty += burstEstimator.getLatencyEstimation(key);
+            }
+        }
+
+        public void printStats() {
+            StringBuilder sb = new StringBuilder();
+
+            aggregateBurstScores();
+
+            sb.append("Cache type: ");
+            sb.append(type);
+            sb.append('\n');
+            sb.append('\n');
+
+            sb.append(String.format("Recency H/R: %.2f\n", (100d * recencyHits) / recencyReqs));
+            sb.append(String.format("Recency ARL: %.2f\n", recencyLatency / recencyReqs));
+            sb.append(String.format("Recency BV: %.2f\n\n", burstScoresOfRec / NUM_OF_RECENCY));
+
+            sb.append(String.format("Frequency H/R: %.2f\n", (100d * frequencyHits) / frequencyReqs));
+            sb.append(String.format("Frequency ARL: %.2f\n", frequencyLatency / frequencyReqs));
+            sb.append(String.format("Frequency BV: %.2f\n\n", burstScoresOfFreq / NUM_OF_FREQUENCY));
+
+            sb.append(String.format("Bursty H/R: %.2f\n", (100d * burstyHits) / burstyReqs));
+            sb.append(String.format("Bursty ARL: %.2f\n", burstyLatency / burstyReqs));
+            sb.append(String.format("Bursty BV: %.2f\n", burstScoresOfBursty / NUM_OF_BURSTY));
+
+            System.out.println(sb);
         }
     }
 }
