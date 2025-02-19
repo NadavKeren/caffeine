@@ -52,20 +52,6 @@ public class SearchableMinimumHeap<V> {
         this.idxMap = new Long2IntOpenHashMap(maximalCapacity, DEFAULT_LOAD_FACTOR);
 
         other.copyInto(this);
-//        int numItemsToMove = Math.min(maximalCapacity, other.size);
-//        for (int i = 0; i < numItemsToMove; ++i) {
-//            long key = other.heap[i];
-//            V value = other.get(key);
-//
-//            this.heap[i] = key;
-//            this.valuesMap.put(key, value);
-//            this.idxMap.put(key, i);
-//        }
-//
-//        this.size = other.size;
-//        this.maxSize = other.maxSize;
-//
-//        makeHeap();
     }
 
     public void copyInto(SearchableMinimumHeap<V> other) {
@@ -257,7 +243,7 @@ public class SearchableMinimumHeap<V> {
             }
 
             leftChildIdx = (minimalChildIdx << 1) + 1;
-            rightChildIdx = minimalChildIdx + 1;
+            rightChildIdx = leftChildIdx + 1;
         }
 
         this.idxMap.put(targetItem, i);
