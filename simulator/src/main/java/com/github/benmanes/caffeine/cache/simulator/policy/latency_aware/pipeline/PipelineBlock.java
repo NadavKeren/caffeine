@@ -41,4 +41,6 @@ public interface PipelineBlock {
      * @param size - a non-negative number smaller or equal to the total cache size.
      */
     void setSize(int size);
+
+    String type();
 }

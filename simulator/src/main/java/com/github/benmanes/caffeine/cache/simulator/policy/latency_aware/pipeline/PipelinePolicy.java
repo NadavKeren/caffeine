@@ -12,7 +12,6 @@ import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.LatestLatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.MovingAverageBurstLatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.MovingAverageWithSketchBurstEstimator;
-import com.tangosol.util.AssertionException;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigException;
 
@@ -41,7 +40,6 @@ public class PipelinePolicy implements Policy {
     private PolicyStats stats;
     final private PipelineBlock[] blocks;
     final private int[] quota;
-    final private BlockType[] types;
     final private int totalQuanta;
     final private int blockCount;
     final private int quantumSize;
@@ -65,7 +63,6 @@ public class PipelinePolicy implements Policy {
         this.stats = null;
         this.blocks = null;
         this.quota = null;
-        this.types = null;
         this.totalQuanta = 0;
         this.blockCount = 0;
         this.quantumSize = 0;
@@ -92,7 +89,6 @@ public class PipelinePolicy implements Policy {
         cacheCapacity = totalQuanta * quantumSize;
 
         blockCount = settings.numOfBlocks();
-        types = new BlockType[blockCount];
         quota = new int[blockCount];
 
         blocks = new PipelineBlock[blockCount];
@@ -111,7 +107,6 @@ public class PipelinePolicy implements Policy {
 
             blocks[idx] = createBlock(type, currQuota, config, currConfig);
             quota[idx] = currQuota;
-            types[idx] = BlockType.fromString(type);
         }
 
         stats = new PolicyStats(generatePipelineName());
@@ -155,7 +150,7 @@ public class PipelinePolicy implements Policy {
                 break;
             default:
                 Assert.assertCondition(false, "No such estimation type");
-                throw new AssertionException();
+                throw new AssertionError();
         }
 
         return burstEstimator;
@@ -198,7 +193,7 @@ public class PipelinePolicy implements Policy {
         sb.append(") [");
 
         for (int i = 0; i < blockCount; ++i) {
-            sb.append(types[i].toString());
+            sb.append(blocks[i].type());
             sb.append(String.format(": %.1f <%d>", 100.0 * this.quota[i] / totalQuanta, this.blocks[i].capacity()));
 
             if (i < blockCount - 1) {
@@ -261,7 +256,6 @@ public class PipelinePolicy implements Policy {
         this.opDumpWriter = null;
 
         this.blocks = new PipelineBlock[blockCount];
-        this.types = new BlockType[blockCount];
         this.quota = new int[blockCount];
 
         this.latencyEstimator = new UneditableLatencyEstimatorProxy(source.latencyEstimator);
@@ -269,7 +263,6 @@ public class PipelinePolicy implements Policy {
 
         for (int i = 0; i < blockCount; ++i) {
             blocks[i] = source.blocks[i].createCopy();
-            types[i] = source.types[i];
             quota[i] = source.quota[i];
 
             Assert.assertCondition(blocks[i] != null, "Created null copy at: " + i);
@@ -301,8 +294,8 @@ public class PipelinePolicy implements Policy {
             if (entry == null) {
                 entry = blocks[idx].getEntry(event.key());
 
-                if (DEBUG && opDumpWriter != null && dumper != null) {
-                    opDumpWriter.println(event.key() + " found in " + types[idx]);
+                if (DEBUG && opDumpWriter != null && dumper != null && entry != null) {
+                    opDumpWriter.println(event.key() + " found in " + block.type());
                     dumper.println(event.eventNum() + " in cache");
                 }
             }
@@ -347,18 +340,18 @@ public class PipelinePolicy implements Policy {
 
         final int totalSizeBeforeInsertion = Arrays.stream(blocks).mapToInt(PipelineBlock::size).sum();
 
-        for (int idx = 0; idx < blockCount; ++idx) {
+        for (PipelineBlock block : blocks) {
             if (newItem != null) {
                 if (dumper != null) {
                     dumper.print(eventNum + "\t"
-                                 + types[idx].toString() + ":\t"
+                                 + block.type() + ":\t"
                                  + newItem.key() + " -> ");
                 }
 
-                newItem = blocks[idx].insert(newItem);
+                newItem = block.insert(newItem);
 
                 if (DEBUG) {
-                    debugPrint(idx, newItem, eventNum);
+                    debugPrint(block.type(), newItem, eventNum);
                 }
             }
         }
@@ -382,7 +375,7 @@ public class PipelinePolicy implements Policy {
         }
     }
 
-    private void debugPrint(int idx, @Nullable EntryData item, int eventNum) {
+    private void debugPrint(String blockType, @Nullable EntryData item, int eventNum) {
         if (dumper == null) {
             return;
         }
@@ -391,7 +384,7 @@ public class PipelinePolicy implements Policy {
                        ? ConsoleColors.colorString("null", ConsoleColors.PURPLE)
                        : ConsoleColors.colorString(String.valueOf(item.key()), ConsoleColors.CYAN);
 
-        dumper.println(eventNum + ":\t" + ConsoleColors.colorString(types[idx] + " -> ", ConsoleColors.YELLOW) + itemStr);
+        dumper.println(eventNum + ":\t" + ConsoleColors.colorString(blockType + " -> ", ConsoleColors.YELLOW) + itemStr);
     }
 
     private void recordAccordingToAvailability(EntryData entry, AccessEvent currEvent) {
@@ -458,7 +451,12 @@ public class PipelinePolicy implements Policy {
     }
 
     public PipelineState getCurrentState() {
-        return new PipelineState(this.types, this.quota);
+        String[] types = new String[this.blockCount];
+        for (int idx = 0; idx < types.length; ++idx) {
+            types[idx] = blocks[idx].type();
+        }
+
+        return new PipelineState(types, this.quota);
     }
 
     public int blockCount() {
@@ -479,14 +477,13 @@ public class PipelinePolicy implements Policy {
         return quota[idx] > 0;
     }
 
-    public String getType(int idx) { return types[idx].toString(); }
+    public String getType(int idx) { return blocks[idx].type(); }
 
     public static final class PipelineState {
-        final public BlockType[] types;
-
+        final public String[] types;
         final public int[] quotas;
 
-        public PipelineState(BlockType[] types, int[] quotas) {
+        public PipelineState(String[] types, int[] quotas) {
             this.types = Arrays.copyOf(types, types.length);
             this.quotas = Arrays.copyOf(quotas, quotas.length);
         }
@@ -588,34 +585,14 @@ public class PipelinePolicy implements Policy {
         }
     }
 
-    public enum BlockType {
-        LRU("LRU"),
-        LFU("LFU"),
-        BC("BC");
 
-        BlockType(String str) {
-            this.str = str;
         }
 
-        final private String str;
 
-        public static BlockType fromString(String type) {
-            switch (type) {
-                case "LRU":
-                    return LRU;
-                case "LFU":
-                    return LFU;
-                case "BC":
-                    return BC;
-                default:
-                    throw new IllegalStateException("No such type defined " + type);
             }
         }
 
 
-        @Override
-        public String toString() {
-            return this.str;
         }
     }
 }

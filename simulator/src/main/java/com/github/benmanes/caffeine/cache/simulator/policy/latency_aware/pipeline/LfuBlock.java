@@ -117,8 +117,8 @@ public class LfuBlock implements PipelineBlock {
     public void copyInto(PipelineBlock other) {
         Assert.assertCondition(other instanceof LfuBlock,
                                () -> String.format("Got wrong block type: expected: %s\tgot: %s",
-                                                   this.getClass().getSimpleName(),
-                                                   other.getClass().getSimpleName()));
+                                                   this.type(),
+                                                   other.type()));
         LfuBlock casted = (LfuBlock) other;
 
         this.protectedBlock.copyInto(casted.protectedBlock);
@@ -134,8 +134,6 @@ public class LfuBlock implements PipelineBlock {
         casted.maxDeltaCounts = this.maxDeltaCounts;
         casted.samplesCount = this.samplesCount;
     }
-
-
 
     @Override
     public void clear() {
@@ -280,6 +278,11 @@ public class LfuBlock implements PipelineBlock {
                                () -> String.format("Size overflow: size: %d, capacity: %d", size, capacity));
         Assert.assertCondition(capacity == probationBlock.capacity() + protectedBlock.capacity(),
                                () -> String.format("Capacity mismatch. Total: %d, probation: %d, protected: %d", capacity, probationBlock.capacity(), protectedBlock.capacity()));
+    }
+
+    @Override
+    public String type() {
+        return "LFU";
     }
 
     private static class LfuBlockSettings extends BasicSettings {

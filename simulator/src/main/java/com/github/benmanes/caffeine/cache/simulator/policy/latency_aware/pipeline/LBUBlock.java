@@ -67,11 +67,10 @@ public class LBUBlock implements PipelineBlock {
 
     @Override
     public void copyInto(PipelineBlock other) {
-        Assert.assertCondition(other instanceof BurstCache,
         Assert.assertCondition(other instanceof LBUBlock,
                                () -> String.format("Got wrong block type: expected: %s\tgot: %s",
-                                                   this.getClass().getSimpleName(),
-                                                   other.getClass().getSimpleName()));
+                                                   this.type(),
+                                                   other.type()));
 
         LBUBlock casted = (LBUBlock) other;
 

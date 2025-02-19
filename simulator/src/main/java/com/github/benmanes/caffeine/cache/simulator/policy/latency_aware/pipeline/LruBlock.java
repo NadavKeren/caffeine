@@ -67,8 +67,8 @@ public class LruBlock implements PipelineBlock {
     public void copyInto(PipelineBlock other) {
         Assert.assertCondition(other instanceof LruBlock,
                                () -> String.format("Got wrong block type: expected: %s\tgot: %s",
-                                                   this.getClass().getSimpleName(),
-                                                   other.getClass().getSimpleName()));
+                                                   this.type(),
+                                                   other.type()));
         LruBlock casted = (LruBlock) other;
 
         this.block.copyInto(casted.block);
@@ -164,6 +164,11 @@ public class LruBlock implements PipelineBlock {
 
         Assert.assertCondition(block.size() <= block.capacity(),
                 () -> String.format("Block overflow: size: %d, capacity: %d", block.size(), block.capacity()));
+    }
+
+    @Override
+    public String type() {
+        return "LRU";
     }
 
     private static class LruBlockSettings extends BasicSettings {
