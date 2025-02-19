@@ -95,7 +95,7 @@ public class HyperbolicPolicy implements Policy {
     }
 
     private void recordAccordingToAvailability(AccessEvent entryEvent, AccessEvent currEvent) {
-        boolean isAvailable = entryEvent.isAvailableAt(currEvent.getArrivalTime());
+        boolean isAvailable = entryEvent.isAvailableAt(currEvent.getRequestTime());
         if (isAvailable) {
             currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
             policyStats.recordHit();

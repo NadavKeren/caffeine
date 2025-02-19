@@ -70,7 +70,7 @@ public class AccessEvent {
   public EventStatus getStatus() { return status; }
 
   public boolean isAvailableAt(double time) { return true; }
-  public double getArrivalTime() { return 0; }
+  public double getRequestTime() { return 0; }
   public double getAvailabilityTime() { return 0; }
 
   /** Returns the delta of the penalties for this entry*/
@@ -151,22 +151,22 @@ public class AccessEvent {
     final private double missPenalty;
     private double hitPenalty;
     private double delayedHitPenalty = 0;
-    private double arrivalTime;
-    private double availabilityTime;
+    private final double requestTime;
+    private final double availabilityTime;
 
     PenaltiesAccessEvent(long key,
                          double hitPenalty,
                          double missPenalty,
-                         double arrivalTime) {
+                         double requestTime) {
       super(key);
       this.hitPenalty = hitPenalty;
       this.missPenalty = missPenalty;
       this.hitPenalty = hitPenalty;
-      this.arrivalTime = arrivalTime;
-      this.availabilityTime = arrivalTime + missPenalty;
+      this.requestTime = requestTime;
+      this.availabilityTime = requestTime + missPenalty;
       checkArgument(hitPenalty >= 0);
       checkArgument(missPenalty >= 0);
-      checkArgument(arrivalTime >= 0);
+      checkArgument(requestTime >= 0);
     }
 
     @Override public void updateHitPenalty(double hitPenalty) {
@@ -184,7 +184,7 @@ public class AccessEvent {
 
     @Override
     public void setDelayedHitPenalty(double availabilityTime) {
-      this.delayedHitPenalty = availabilityTime - this.arrivalTime;
+      this.delayedHitPenalty = availabilityTime - this.requestTime;
     }
 
     @Override public boolean isPenaltyAware() {
@@ -195,7 +195,7 @@ public class AccessEvent {
     public boolean isAvailableAt(double time) { return (availabilityTime <= time); }
 
     @Override
-    public double getArrivalTime() { return arrivalTime; }
+    public double getRequestTime() { return requestTime; }
 
     @Override
     public double getAvailabilityTime() { return availabilityTime; }

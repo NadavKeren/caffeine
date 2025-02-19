@@ -137,7 +137,7 @@ public final class CostAwareArcPolicy implements Policy {
     }
 
     private void recordAccordingToAvailability(EntryData entry, AccessEvent currEvent) {
-        boolean isAvailable = entry.event().isAvailableAt(currEvent.getArrivalTime());
+        boolean isAvailable = entry.event().isAvailableAt(currEvent.getRequestTime());
         if (isAvailable) {
             currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
             policyStats.recordHit();

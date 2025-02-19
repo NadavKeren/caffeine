@@ -156,7 +156,7 @@ public class WindowTinyLfuPolicy implements Policy {
         throw new IllegalStateException();
       }
 
-      boolean isAvailable = node.event.isAvailableAt(event.getArrivalTime());
+      boolean isAvailable = node.event.isAvailableAt(event.getRequestTime());
       if (isAvailable) {
         event.changeEventStatus(AccessEvent.EventStatus.HIT);
         policyStats.recordHit();

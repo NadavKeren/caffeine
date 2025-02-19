@@ -112,4 +112,9 @@ public class BurstCache implements PipelineBlock {
     public void validate() {
         block.validate();
     }
+
+    @Override
+    public String type() {
+        return "LBU";
+    }
 }

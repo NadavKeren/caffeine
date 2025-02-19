@@ -43,7 +43,7 @@ public class YanLi implements Policy {
 
         Entry entry = items.get(key);
         if (entry != null) {
-            entry.addArrival(event.getArrivalTime());
+            entry.addArrival(event.getRequestTime());
             recordAccordingToAvailability(entry, event);
         } else {
             stats.recordMiss();
@@ -78,7 +78,7 @@ public class YanLi implements Policy {
     }
 
     private void recordAccordingToAvailability(Entry entry, AccessEvent currEvent) {
-        boolean isAvailable = entry.event().isAvailableAt(currEvent.getArrivalTime());
+        boolean isAvailable = entry.event().isAvailableAt(currEvent.getRequestTime());
         if (isAvailable) {
             currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
             stats.recordHit();
@@ -111,7 +111,7 @@ public class YanLi implements Policy {
         public Entry(AccessEvent event) {
             this.event = event;
             this.interArrivalTimes = new ArrayDeque<>();
-            this.lastArrivalTime = event.getArrivalTime();
+            this.lastArrivalTime = event.getRequestTime();
             this.estimate = 0.00001f; // Used in the original code
         }
 

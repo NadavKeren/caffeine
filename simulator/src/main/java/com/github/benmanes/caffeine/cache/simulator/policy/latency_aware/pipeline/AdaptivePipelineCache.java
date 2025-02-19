@@ -198,8 +198,8 @@ public class AdaptivePipelineCache implements Policy {
     private void onMiss(AccessEvent event) {
         EntryData newItem = new EntryData(event);
 
-        latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
-        burstEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
+        latencyEstimator.record(event.key(), event.missPenalty(), event.getRequestTime());
+        burstEstimator.record(event.key(), event.missPenalty(), event.getRequestTime());
 
         for (int idx = 0; idx < blockCount; ++idx) {
             if (newItem != null) {
@@ -219,13 +219,13 @@ public class AdaptivePipelineCache implements Policy {
     }
 
     private void recordAccordingToAvailability(EntryData entry, AccessEvent currEvent) {
-        boolean isAvailable = entry.event().isAvailableAt(currEvent.getArrivalTime());
+        boolean isAvailable = entry.event().isAvailableAt(currEvent.getRequestTime());
 
         if (isAvailable) {
             currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
             stats.recordHit();
             stats.recordHitPenalty(currEvent.hitPenalty());
-            burstEstimator.addValueToRecord(currEvent.key(), 0, currEvent.getArrivalTime());
+            burstEstimator.addValueToRecord(currEvent.key(), 0, currEvent.getRequestTime());
 
             latencyEstimator.recordHit(currEvent.hitPenalty());
             burstEstimator.recordHit(currEvent.hitPenalty());
@@ -238,8 +238,8 @@ public class AdaptivePipelineCache implements Policy {
             stats.recordDelayedHit();
             latencyEstimator.addValueToRecord(currEvent.key(),
                                               currEvent.delayedHitPenalty(),
-                                              currEvent.getArrivalTime());
-            burstEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
+                                              currEvent.getRequestTime());
+            burstEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getRequestTime());
 
             stats.recordMissAt(currEvent.key());
         }

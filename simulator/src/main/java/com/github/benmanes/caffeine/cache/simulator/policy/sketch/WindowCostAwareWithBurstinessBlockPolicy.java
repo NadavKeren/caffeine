@@ -263,7 +263,7 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
         if (dumper != null) {
             dumper.print(event.eventNum() + " LRU: " + event.key() + " -> ");
         }
-        evict(event.getArrivalTime(), event.eventNum());
+        evict(event.getRequestTime(), event.eventNum());
     }
 
     /**
@@ -438,8 +438,8 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             policyStats.recordBurstBlockHit(event.missPenalty());
         } else {
             onMiss(event);
-            latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
-            burstEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
+            latencyEstimator.record(event.key(), event.missPenalty(), event.getRequestTime());
+            burstEstimator.record(event.key(), event.missPenalty(), event.getRequestTime());
             policyStats.recordMiss(event.missPenalty());
             policyStats.recordMissPenalty(event.missPenalty());
             updateNormalization(key);
@@ -473,12 +473,12 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
     }
 
     private void recordAccordingToAvailability(EntryData entry, AccessEvent currEvent) {
-        boolean isAvailable = entry.event().isAvailableAt(currEvent.getArrivalTime());
+        boolean isAvailable = entry.event().isAvailableAt(currEvent.getRequestTime());
         if (isAvailable) {
             currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
             policyStats.recordHit();
             policyStats.recordHitPenalty(currEvent.hitPenalty());
-            burstEstimator.addValueToRecord(currEvent.key(), 0, currEvent.getArrivalTime());
+            burstEstimator.addValueToRecord(currEvent.key(), 0, currEvent.getRequestTime());
 
             latencyEstimator.recordHit(currEvent.hitPenalty());
             burstEstimator.recordHit(currEvent.hitPenalty());
@@ -489,8 +489,8 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
             policyStats.recordDelayedHit();
             latencyEstimator.addValueToRecord(currEvent.key(),
                                               currEvent.delayedHitPenalty(),
-                                              currEvent.getArrivalTime());
-            burstEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getArrivalTime());
+                                              currEvent.getRequestTime());
+            burstEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getRequestTime());
         }
     }
 

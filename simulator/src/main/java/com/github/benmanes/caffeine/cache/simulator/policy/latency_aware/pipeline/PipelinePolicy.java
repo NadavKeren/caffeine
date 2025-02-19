@@ -323,8 +323,8 @@ public class PipelinePolicy implements Policy {
     private void onMiss(AccessEvent event) {
         event.changeEventStatus(AccessEvent.EventStatus.MISS);
 
-        latencyEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
-        burstEstimator.record(event.key(), event.missPenalty(), event.getArrivalTime());
+        latencyEstimator.record(event.key(), event.missPenalty(), event.getRequestTime());
+        burstEstimator.record(event.key(), event.missPenalty(), event.getRequestTime());
 
         stats.recordMiss();
         stats.recordMissPenalty(event.missPenalty());
