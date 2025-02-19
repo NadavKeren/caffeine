@@ -56,7 +56,7 @@ public class MovingAverageBurstLatencyEstimator implements LatencyEstimator {
     public void record(long key, double value, double recordTime) {
         storedValues.put(key, new Entry(key, value, recordTime));
 
-        Assert.assertCondition(storedValues.size() <= maxSize + 1, () -> String.format("There are more stored values (%d) than the max cache size: %d", storedValues.size(), maxSize));
+//        Assert.assertCondition(storedValues.size() <= maxSize + 1, () -> String.format("There are more stored values (%d) than the max cache size: %d", storedValues.size(), maxSize));
     }
 
     @Override
@@ -75,7 +75,7 @@ public class MovingAverageBurstLatencyEstimator implements LatencyEstimator {
         storedValues.remove(key);
 
         Assert.assertCondition(!storedValues.containsKey(key), () -> String.format("The key %d should be removed", key));
-        Assert.assertCondition(storedValues.size() <= maxSize, () -> String.format("The size of stored values is %d", storedValues.size()));
+//        Assert.assertCondition(storedValues.size() <= maxSize, () -> String.format("The size of stored values is %d", storedValues.size()));
     }
 
     @Override

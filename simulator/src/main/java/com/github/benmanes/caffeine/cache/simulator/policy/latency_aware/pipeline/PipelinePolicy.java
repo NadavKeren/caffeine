@@ -38,6 +38,7 @@ public class PipelinePolicy implements Policy {
     final public static PipelinePolicy DUMMY = new DummyPipeline();
 
     private PolicyStats stats;
+    final private FetchStage fetchingStage;
     final private PipelineBlock[] blocks;
     final private int[] quota;
     final private int totalQuanta;
@@ -60,6 +61,7 @@ public class PipelinePolicy implements Policy {
     final private LatencyEstimator burstEstimator;
 
     private PipelinePolicy() {
+        this.fetchingStage = null;
         this.stats = null;
         this.blocks = null;
         this.quota = null;
@@ -87,6 +89,8 @@ public class PipelinePolicy implements Policy {
         quantumSize = settings.quantumSize() >> shrinkOrder;
         Assert.assertCondition(quantumSize > 0, () -> String.format("The sampling order is too high: %d", shrinkOrder));
         cacheCapacity = totalQuanta * quantumSize;
+
+        fetchingStage = new FetchStage(10 * cacheCapacity);
 
         blockCount = settings.numOfBlocks();
         quota = new int[blockCount];
@@ -246,6 +250,8 @@ public class PipelinePolicy implements Policy {
      * @param source - the pipeline to copy, using proxies to the estimators.
      */
     private PipelinePolicy(PipelinePolicy source) {
+        Assert.assertCondition(!source.isDummy, "Should not copy a dummy cache");
+
         this.totalQuanta = source.totalQuanta;
         this.blockCount = source.blockCount;
         this.quantumSize = source.quantumSize;
@@ -254,6 +260,9 @@ public class PipelinePolicy implements Policy {
         this.timeframeOpCount = 0;
         this.dumper = null;
         this.opDumpWriter = null;
+
+        this.fetchingStage = new FetchStage(10 * cacheCapacity);
+        this.isDummy = false;
 
         this.blocks = new PipelineBlock[blockCount];
         this.quota = new int[blockCount];
@@ -275,37 +284,55 @@ public class PipelinePolicy implements Policy {
         return new PipelinePolicy(this);
     }
 
+    private void insertArrivals(double timeStamp) {
+        while (fetchingStage.size() > 0 && fetchingStage.getClosestArrival() < timeStamp) {
+            AccessEvent arrivedEvent = fetchingStage.extractClosestArrival();
+            EntryData arrivedData = new EntryData(arrivedEvent);
+            insertionProcess(arrivedData);
+        }
+    }
+
     @Override
     public void record(AccessEvent event) {
         if (isDummy) {
             return;
         }
 
+        insertArrivals(event.getRequestTime());
         EntryData entry = null;
 
         if (opDumpWriter != null) {
             opDumpWriter.print(ConsoleColors.colorString(String.format("event: \t%d\t", event.eventNum()), ConsoleColors.WHITE_BOLD));
         }
 
-        for (int idx = 0; idx < blockCount; ++idx) {
-            // Not stopping after item is found in order to let all blocks perform bookkeeping
-            blocks[idx].bookkeeping(event.key());
+        if (fetchingStage.contains(event.key())) {
+            onHitAtFetchStage(fetchingStage.get(event.key()), event);
 
-            if (entry == null) {
-                entry = blocks[idx].getEntry(event.key());
+            for (PipelineBlock block : blocks) {
+                block.bookkeeping(event.key());
+            }
+        } else {
+            for (PipelineBlock block : blocks) {
+                // Not stopping after item is found in order to let all blocks perform bookkeeping
+                block.bookkeeping(event.key());
+
+                if (entry == null) {
+                    entry = block.getEntry(event.key());
+                }
 
                 if (DEBUG && opDumpWriter != null && dumper != null && entry != null) {
                     opDumpWriter.println(event.key() + " found in " + block.type());
                     dumper.println(event.eventNum() + " in cache");
                 }
             }
+
+            if (entry == null) {
+                onMiss(event);
+            } else {
+                onCacheHit(entry, event);
+            }
         }
 
-        if (entry == null) {
-            onMiss(event);
-        } else {
-            recordAccordingToAvailability(entry, event);
-        }
     }
 
     @Override
@@ -325,11 +352,11 @@ public class PipelinePolicy implements Policy {
         ++this.timeframeOpCount;
         this.timeframePenalty += event.missPenalty();
 
-        EntryData newItem = new EntryData(event);
-        insertionProcess(newItem);
         for (int idx = 0; idx < blockCount; ++idx) {
             blocks[idx].onMiss(event.key());
         }
+
+        this.fetchingStage.insert(event);
     }
 
     private void insertionProcess(EntryData newItem) {
@@ -366,9 +393,9 @@ public class PipelinePolicy implements Policy {
             latencyEstimator.remove(newItem.key());
             burstEstimator.remove(newItem.key());
 
-            Assert.assertCondition(latencyEstimator.size() <= cacheCapacity,
+            Assert.assertCondition(latencyEstimator.size() <= cacheCapacity + fetchingStage.size(),
                                    () -> String.format("The latency estimator size is bigger than the cache size: %d", latencyEstimator.size()));
-            Assert.assertCondition(burstEstimator.size() <= cacheCapacity,
+            Assert.assertCondition(burstEstimator.size() <= cacheCapacity + fetchingStage.size(),
                                    () -> String.format("The burst estimator size is bigger than the cache size: %d", burstEstimator.size()));
         } else {
             Assert.assertCondition(totalSizeBeforeInsertion < cacheCapacity, () -> String.format("The total size %d before the insertion is the cache-capacity %d, and the removed item is null", totalSizeBeforeInsertion, cacheCapacity));
@@ -387,33 +414,37 @@ public class PipelinePolicy implements Policy {
         dumper.println(eventNum + ":\t" + ConsoleColors.colorString(blockType + " -> ", ConsoleColors.YELLOW) + itemStr);
     }
 
-    private void recordAccordingToAvailability(EntryData entry, AccessEvent currEvent) {
-        boolean isAvailable = entry.event().isAvailableAt(currEvent.getArrivalTime());
+    private void onCacheHit(EntryData entry, AccessEvent currEvent) {
+        boolean isAvailable = entry.event().isAvailableAt(currEvent.getRequestTime());
+        Assert.assertCondition(isAvailable, "Should not consider an non-available event as cache hit");
 
-        if (isAvailable) {
-            currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
-            stats.recordHit();
-            stats.recordHitPenalty(currEvent.hitPenalty());
-            burstEstimator.addValueToRecord(currEvent.key(), 0, currEvent.getArrivalTime());
-            this.timeframePenalty += currEvent.hitPenalty();
+        currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
+        stats.recordHit();
+        stats.recordHitPenalty(currEvent.hitPenalty());
+        burstEstimator.addValueToRecord(currEvent.key(), 0, currEvent.getRequestTime());
+        this.timeframePenalty += currEvent.hitPenalty();
 
-            latencyEstimator.recordHit(currEvent.hitPenalty());
-            burstEstimator.recordHit(currEvent.hitPenalty());
-        } else {
-            currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
-            currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());
-            stats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
-            stats.recordDelayedHit();
-            this.timeframePenalty += currEvent.delayedHitPenalty();
-            latencyEstimator.addValueToRecord(currEvent.key(),
-                                              currEvent.delayedHitPenalty(),
-                                              currEvent.getArrivalTime());
-            burstEstimator.addValueToRecord(currEvent.key(),
-                                            currEvent.delayedHitPenalty(),
-                                            currEvent.getArrivalTime());
-        }
+        latencyEstimator.recordHit(currEvent.hitPenalty());
+        burstEstimator.recordHit(currEvent.hitPenalty());
 
         ++this.timeframeOpCount;
+    }
+
+    private void onHitAtFetchStage(AccessEvent fetchEvent, AccessEvent pendingEvent) {
+        pendingEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+        pendingEvent.setDelayedHitPenalty(fetchEvent.getAvailabilityTime());
+
+        stats.recordDelayedHitPenalty(pendingEvent.delayedHitPenalty());
+        stats.recordDelayedHit();
+
+        this.timeframePenalty += pendingEvent.delayedHitPenalty();
+
+        latencyEstimator.addValueToRecord(pendingEvent.key(),
+                                          pendingEvent.delayedHitPenalty(),
+                                          pendingEvent.getRequestTime());
+        burstEstimator.addValueToRecord(pendingEvent.key(),
+                                        pendingEvent.delayedHitPenalty(),
+                                        pendingEvent.getRequestTime());
     }
 
     public double getTimeframeAveragePenalty() {
@@ -582,17 +613,6 @@ public class PipelinePolicy implements Policy {
         @Override
         public boolean canShrink(int idx) {
             return false;
-        }
-    }
-
-
-        }
-
-
-            }
-        }
-
-
         }
     }
 }
