@@ -10,7 +10,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.Charset;
 
-public class MovingAverageWithSketchBurstEstimator extends MovingAverageBurstLatencyEstimator {
+public class ApproximateWithSketchBurstEstimator extends ApproximateBurstLatencyEstimator {
     final private static boolean DEBUG = false;
     @Nullable private PrintWriter dumper = null;
     protected SumMin64 sketch;
@@ -19,15 +19,15 @@ public class MovingAverageWithSketchBurstEstimator extends MovingAverageBurstLat
     private int opsSinceDecay;
 
 
-    public MovingAverageWithSketchBurstEstimator(long agingWindowSize,
-                                                 double ageSmoothingFactor,
-                                                 int numOfPartitions,
-                                                 double eps,
-                                                 double confidence,
-                                                 int seed,
-                                                 int decayTimeframe,
-                                                 double decayFactor,
-                                                 int maxSize) {
+    public ApproximateWithSketchBurstEstimator(long agingWindowSize,
+                                               double ageSmoothingFactor,
+                                               int numOfPartitions,
+                                               double eps,
+                                               double confidence,
+                                               int seed,
+                                               int decayTimeframe,
+                                               double decayFactor,
+                                               int maxSize) {
         super(agingWindowSize, ageSmoothingFactor, numOfPartitions, maxSize);
         sketch = new SumMin64(eps, confidence, seed);
         this.decayTimeframe = decayTimeframe;

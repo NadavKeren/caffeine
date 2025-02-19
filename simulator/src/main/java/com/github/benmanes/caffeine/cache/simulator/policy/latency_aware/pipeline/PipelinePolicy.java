@@ -10,8 +10,8 @@ import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.LatestLatencyEstimator;
-import com.github.benmanes.caffeine.cache.simulator.policy.sketch.MovingAverageBurstLatencyEstimator;
-import com.github.benmanes.caffeine.cache.simulator.policy.sketch.MovingAverageWithSketchBurstEstimator;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.ApproximateBurstLatencyEstimator;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.ApproximateWithSketchBurstEstimator;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigException;
 
@@ -135,22 +135,22 @@ public class PipelinePolicy implements Policy {
         LatencyEstimator burstEstimator;
 
         switch (type) {
-            case "normal" :
-                burstEstimator = new MovingAverageBurstLatencyEstimator(settings.agingWindowSize(),
-                                                                        settings.ageSmoothFactor(),
-                                                                        settings.numOfPartitions(),
-                                                                        this.cacheCapacity);
+            case "approximate" :
+                burstEstimator = new ApproximateBurstLatencyEstimator(settings.agingWindowSize(),
+                                                                      settings.ageSmoothFactor(),
+                                                                      settings.numOfPartitions(),
+                                                                      this.cacheCapacity);
                 break;
             case "sketch":
-                burstEstimator = new MovingAverageWithSketchBurstEstimator(settings.agingWindowSize(),
-                                                                           settings.ageSmoothFactor(),
-                                                                           settings.numOfPartitions(),
-                                                                           settings.eps(),
-                                                                           settings.confidence(),
-                                                                           settings.randomSeed(),
+                burstEstimator = new ApproximateWithSketchBurstEstimator(settings.agingWindowSize(),
+                                                                         settings.ageSmoothFactor(),
+                                                                         settings.numOfPartitions(),
+                                                                         settings.eps(),
+                                                                         settings.confidence(),
+                                                                         settings.randomSeed(),
                                                                            settings.agingWindowSize() * this.cacheCapacity,
-                                                                           settings.ageSmoothFactor(),
-                                                                           this.cacheCapacity);
+                                                                         settings.ageSmoothFactor(),
+                                                                         this.cacheCapacity);
                 break;
             default:
                 Assert.assertCondition(false, "No such estimation type");

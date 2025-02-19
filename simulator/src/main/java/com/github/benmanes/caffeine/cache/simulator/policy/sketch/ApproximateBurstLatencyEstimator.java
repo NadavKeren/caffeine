@@ -22,7 +22,7 @@ import java.time.ZoneId;
  * Smoothing Factor = alpha
  *
  */
-public class MovingAverageBurstLatencyEstimator implements LatencyEstimator {
+public class ApproximateBurstLatencyEstimator implements LatencyEstimator {
     private static Logger logger = null;
     final private static boolean DEBUG = false;
     final private static int INITIAL_SIZE = 1000000;
@@ -35,7 +35,7 @@ public class MovingAverageBurstLatencyEstimator implements LatencyEstimator {
 
     private double hitPenalty;
 
-    public MovingAverageBurstLatencyEstimator(long agingWindowSize, double ageSmoothingFactor, int numOfPartitions, int maxSize) {
+    public ApproximateBurstLatencyEstimator(long agingWindowSize, double ageSmoothingFactor, int numOfPartitions, int maxSize) {
         storedValues = new Long2ObjectOpenHashMap<>(INITIAL_SIZE, LOAD_FACTOR);
         storedValues.defaultReturnValue(null);
 

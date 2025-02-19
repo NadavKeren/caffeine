@@ -10,7 +10,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.LatestLatencyEstimator;
-import com.github.benmanes.caffeine.cache.simulator.policy.sketch.MovingAverageBurstLatencyEstimator;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.ApproximateBurstLatencyEstimator;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigException;
 
@@ -72,10 +72,10 @@ public class AdaptivePipelineCache implements Policy {
         final var blockConfigs = settings.blocksConfigs();
         types = new String[blockCount];
         latencyEstimator = new LatestLatencyEstimator();
-        burstEstimator = new MovingAverageBurstLatencyEstimator(settings.agingWindowSize(),
-                                                                settings.ageSmoothFactor(),
-                                                                settings.numOfPartitions(),
-                                                                this.cacheCapacity);
+        burstEstimator = new ApproximateBurstLatencyEstimator(settings.agingWindowSize(),
+                                                              settings.ageSmoothFactor(),
+                                                              settings.numOfPartitions(),
+                                                              this.cacheCapacity);
 
 //        final int ghostSize = settings.ghostSize();
 

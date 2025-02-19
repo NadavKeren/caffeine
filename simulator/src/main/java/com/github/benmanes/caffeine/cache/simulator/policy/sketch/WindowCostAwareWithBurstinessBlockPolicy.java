@@ -218,10 +218,10 @@ public class WindowCostAwareWithBurstinessBlockPolicy implements Policy {
                 estimator = new NaiveBurstLatencyEstimator();
                 break;
             case "moving-average":
-                estimator = new MovingAverageBurstLatencyEstimator(settings.agingWindowSize(),
-                                                                   settings.ageSmoothFactor(),
-                                                                   settings.numOfPartitions(),
-                                                                   this.cacheCapacity);
+                estimator = new ApproximateBurstLatencyEstimator(settings.agingWindowSize(),
+                                                                 settings.ageSmoothFactor(),
+                                                                 settings.numOfPartitions(),
+                                                                 this.cacheCapacity);
                 break;
             case "random":
                 estimator = new RandomNaiveBurstEstimator(0.05);
