@@ -135,6 +135,12 @@ public class PipelinePolicy implements Policy {
         LatencyEstimator burstEstimator;
 
         switch (type) {
+            case "normal":
+                burstEstimator = new MovingAverageBurstEstimator(settings.agingWindowSize(),
+                                                                 settings.ageSmoothFactor(),
+                                                                 settings.numOfPartitions(),
+                                                                 this.cacheCapacity);
+                break;
             case "approximate" :
                 burstEstimator = new ApproximateBurstLatencyEstimator(settings.agingWindowSize(),
                                                                       settings.ageSmoothFactor(),
