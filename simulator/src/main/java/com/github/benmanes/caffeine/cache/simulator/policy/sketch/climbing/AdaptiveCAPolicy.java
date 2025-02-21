@@ -16,6 +16,7 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.FetchStage;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.BucketLatencyEstimation;
 import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
 import com.github.benmanes.caffeine.cache.simulator.admission.LATinyLfu;
@@ -83,6 +84,8 @@ public final class AdaptiveCAPolicy implements Policy {
   private int timeframeHitCount;
   private int timeframeOpCount;
 
+  private FetchStage fetchStage;
+
 
 
   public AdaptiveCAPolicy(
@@ -108,6 +111,8 @@ public final class AdaptiveCAPolicy implements Policy {
     this.maxDelta = 0;
     this.maxDeltaCounts = 0;
     this.samplesCount = 0;
+
+    this.fetchStage = new FetchStage(this.cacheCapacity * 10);
 
     resetTimeFrameCounters();
 
@@ -174,38 +179,66 @@ public final class AdaptiveCAPolicy implements Policy {
     EntryData entry = null;
     admittor.record(event);
 
-    QueueType queue = null;
-    if (windowBlock.isHit(key)) {
-      entry = windowBlock.get(key);
-      onWindowHit(entry);
-      queue = QueueType.WINDOW;
-    } else if (probationBlock.isHit(key)) {
-      entry = probationBlock.get(key);
-      onProbationHit(entry);
-      queue = QueueType.PROBATION;
-    } else if (protectedBlock.isHit(key)) {
-      entry = protectedBlock.get(key);
-      onProtectedHit(entry);
-      queue = QueueType.PROTECTED;
+    insertArrivals(event.getRequestTime());
+
+    if (fetchStage.contains(event.key())) {
+       onHitAtFetchStage(fetchStage.get(event.key()), event);
     } else {
-      updateNormalization(event.key());
-      onMiss(event);
-      latencyEstimator.record(event.key(), event.missPenalty(), event.getRequestTime());
-      policyStats.recordMiss();
-      policyStats.recordMissPenalty(event.missPenalty());
+      QueueType queue = null;
+      if (windowBlock.isHit(key)) {
+        entry = windowBlock.get(key);
+        onWindowHit(entry);
+        queue = QueueType.WINDOW;
+      } else if (probationBlock.isHit(key)) {
+        entry = probationBlock.get(key);
+        onProbationHit(entry);
+        queue = QueueType.PROBATION;
+      } else if (protectedBlock.isHit(key)) {
+        entry = protectedBlock.get(key);
+        onProtectedHit(entry);
+        queue = QueueType.PROTECTED;
+      } else {
+        updateNormalization(event.key());
+        event.changeEventStatus(AccessEvent.EventStatus.MISS);
+        timeframePenalty += event.missPenalty();
+        latencyEstimator.record(event.key(), event.missPenalty(), event.getRequestTime());
+        policyStats.recordMiss();
+        policyStats.recordMissPenalty(event.missPenalty());
+
+        this.fetchStage.insert(event);
+      }
+
+      if (entry != null) {
+        onHit(entry, event);
+      }
+
+      ++timeframeOpCount;
+      final boolean isFull = (size() >= cacheCapacity);
+      climb(event, queue, isFull);
     }
-
-    if (entry != null) {
-       recordAccordingToAvailability(entry, event);
-    }
-
-    ++timeframeOpCount;
-
-    final boolean isFull = (size() >= cacheCapacity);
-    climb(event, queue, isFull);
   }
 
-  private void recordAccordingToAvailability(EntryData entry, AccessEvent currEvent) {
+  private void insertArrivals(double timeStamp) {
+    while (fetchStage.size() > 0 && fetchStage.getClosestArrival() < timeStamp) {
+      AccessEvent arrivedEvent = fetchStage.extractClosestArrival();
+      insertionProcess(arrivedEvent);
+    }
+  }
+
+  private void onHitAtFetchStage(AccessEvent fetchEvent, AccessEvent pendingEvent) {
+    pendingEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+    pendingEvent.setDelayedHitPenalty(fetchEvent.getAvailabilityTime());
+
+    policyStats.recordDelayedHit();
+    policyStats.recordDelayedHitPenalty(pendingEvent.delayedHitPenalty());
+
+    latencyEstimator.addValueToRecord(pendingEvent.key(), pendingEvent.delayedHitPenalty(), pendingEvent.getRequestTime());
+
+    timeframePenalty += pendingEvent.delayedHitPenalty();
+    ++timeframeOpCount;
+  }
+
+  private void onHit(EntryData entry, AccessEvent currEvent) {
     boolean isAvailable = entry.event().isAvailableAt(currEvent.getRequestTime());
     if (isAvailable) {
       currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
@@ -216,14 +249,6 @@ public final class AdaptiveCAPolicy implements Policy {
 
       timeframePenalty += currEvent.hitPenalty();
       ++timeframeHitCount;
-    } else {
-      currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
-      currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());
-      policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
-      policyStats.recordDelayedHit();
-      latencyEstimator.addValueToRecord(currEvent.key(), currEvent.delayedHitPenalty(), currEvent.getRequestTime());
-
-      timeframePenalty += currEvent.delayedHitPenalty();
     }
   }
 
@@ -255,9 +280,7 @@ public final class AdaptiveCAPolicy implements Policy {
   /**
    * Adds the entry to the admission window, evicting if necessary.
    */
-  private void onMiss(AccessEvent event) {
-    event.changeEventStatus(AccessEvent.EventStatus.MISS);
-    timeframePenalty += event.missPenalty();
+  private void insertionProcess(AccessEvent event) {
     windowBlock.addEntry(event);
     windowSize++;
     evict();
