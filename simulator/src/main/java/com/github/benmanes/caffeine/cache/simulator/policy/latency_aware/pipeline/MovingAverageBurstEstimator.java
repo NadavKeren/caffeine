@@ -50,17 +50,15 @@ public class MovingAverageBurstEstimator implements LatencyEstimator {
     @Override
     public double getLatencyEstimation(long key) {
         Entry entry = storedValues.get(key);
-        Assert.assertCondition(entry != null, () -> String.format("Trying to fetch a non-existing item: %d", key));
 
-        return entry.getValue();
+        return entry != null ? entry.getValue() : 0;
     }
 
     @Override
     public double getLatencyEstimation(long key, double time) {
         Entry entry = storedValues.get(key);
-        Assert.assertCondition(entry != null, () -> String.format("Trying to fetch a non-existing item: %d", key));
 
-        return entry.getValue((long) time);
+        return entry != null ? entry.getValue((long) time) : 0;
     }
 
     @Override

@@ -46,7 +46,8 @@ public class PipelinePolicy implements Policy {
     final private int quantumSize;
     final private int cacheCapacity;
 
-    private boolean isDummy = false;
+    private boolean isDummy;
+    final private boolean isCopy;
 
     private double timeframePenalty = 0;
     private int timeframeOpCount = 0;
@@ -71,6 +72,8 @@ public class PipelinePolicy implements Policy {
         this.cacheCapacity = 0;
         this.latencyEstimator = null;
         this.burstEstimator = null;
+        this.isDummy = true;
+        this.isCopy = true;
     }
 
     /***
@@ -128,6 +131,9 @@ public class PipelinePolicy implements Policy {
         } catch (IOException exception) {
             Assert.assertCondition(false, "Got an I/O error on opening the dumpfiles: " + exception.getCause());
         }
+
+        isDummy = false;
+        isCopy = false;
     }
 
     private LatencyEstimator createBurstEstimator(PipelineSettings settings) {
@@ -175,12 +181,12 @@ public class PipelinePolicy implements Policy {
             this.blocks[i].clear();
         }
 
-        isDummy = false;
-        stats = new PolicyStats(generatePipelineName());
-    }
+        this.isDummy = false;
+        if (this.fetchingStage != null) {
+            this.fetchingStage.clear();
+        }
 
-    public void makeDummy() {
-        isDummy = true;
+        stats = new PolicyStats(generatePipelineName());
     }
 
     public void copyInto(PipelinePolicy other) {
@@ -284,6 +290,7 @@ public class PipelinePolicy implements Policy {
         }
 
         stats = new PolicyStats("Copy of " + generatePipelineName());
+        isCopy = true;
     }
 
     public PipelinePolicy createCopy() {
@@ -399,9 +406,9 @@ public class PipelinePolicy implements Policy {
             latencyEstimator.remove(newItem.key());
             burstEstimator.remove(newItem.key());
 
-            Assert.assertCondition(latencyEstimator.size() <= cacheCapacity + fetchingStage.size(),
+            Assert.assertCondition(isCopy || latencyEstimator.size() <= cacheCapacity + fetchingStage.size(),
                                    () -> String.format("The latency estimator size is bigger than the cache size: %d", latencyEstimator.size()));
-            Assert.assertCondition(burstEstimator.size() <= cacheCapacity + fetchingStage.size(),
+            Assert.assertCondition(isCopy || burstEstimator.size() <= cacheCapacity + fetchingStage.size(),
                                    () -> String.format("The burst estimator size is bigger than the cache size: %d", burstEstimator.size()));
         } else {
             Assert.assertCondition(totalSizeBeforeInsertion < cacheCapacity, () -> String.format("The total size %d before the insertion is the cache-capacity %d, and the removed item is null", totalSizeBeforeInsertion, cacheCapacity));
@@ -477,6 +484,10 @@ public class PipelinePolicy implements Policy {
 
         ++quota[incIdx];
         --quota[decIdx];
+    }
+
+    public void makeDummy() {
+        this.isDummy = true;
     }
 
     @Override

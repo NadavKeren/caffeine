@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import it.unimi.dsi.fastutil.longs.*;
 
 import javax.annotation.Nullable;
+import java.util.Arrays;
 import java.util.NoSuchElementException;
 
 @SuppressWarnings("unchecked")
@@ -153,6 +154,12 @@ public class FetchStage {
             Assert.assertCondition(2 * i + 2 >= size || entry.arrivalTime() <= heap[2 * i + 2].arrivalTime(),
                                    () -> String.format("Bad ordering at index %d with %d", idx, 2 * idx + 2));
         }
+    }
+
+    public void clear() {
+        Arrays.fill(this.heap, null);
+        this.valuesMap.clear();
+        this.size = 0;
     }
 
     private static class KeyAndAvailabilityTimePair {
