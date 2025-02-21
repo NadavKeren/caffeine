@@ -14,6 +14,7 @@ import com.github.benmanes.caffeine.cache.simulator.admission.Admission;
 import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.FetchStage;
 import com.google.common.base.MoreObjects;
 import com.google.common.primitives.Ints;
 import com.typesafe.config.Config;
@@ -45,6 +46,9 @@ public class HyperbolicPolicy implements Policy {
     final private Random random;
     final private Node[] table;
 
+    final private FetchStage fetchStage;
+    final private Long2ObjectMap<Node> fetchedItems;
+
     private long tick;
 
     public HyperbolicPolicy(Admission admission, Config config) {
@@ -57,6 +61,8 @@ public class HyperbolicPolicy implements Policy {
         this.data = new Long2ObjectOpenHashMap<>();
         this.sampleSize = settings.sampleSize();
         this.table = new Node[maximumSize + 1];
+        this.fetchStage = new FetchStage(this.maximumSize * 10);
+        this.fetchedItems = new Long2ObjectOpenHashMap<>(this.maximumSize * 2);
     }
 
     /** Returns all variations of this policy based on the configuration parameters. */
@@ -74,37 +80,53 @@ public class HyperbolicPolicy implements Policy {
 
     @Override
     public void record(AccessEvent event) {
+        insertArrivals(event.getRequestTime());
+
         long key = event.key();
         Node node = data.get(key);
         admittor.record(key);
         long now = ++tick;
         if (node == null) {
-            node = new Node(event, data.size(), now);
-            policyStats.recordMiss();
-            policyStats.recordMissPenalty(event.missPenalty());
-            table[node.index] = node;
-            data.put(key, node);
-            evict(node);
+            if (fetchStage.contains(key)) {
+                node = fetchedItems.get(key);
+                node.event.updateHitPenalty(event.hitPenalty());
+                node.accessTime = now;
+                node.frequency++;
+
+                event.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+                event.setDelayedHitPenalty(node.event.getAvailabilityTime());
+                policyStats.recordDelayedHitPenalty(event.delayedHitPenalty());
+                policyStats.recordDelayedHit();
+            } else {
+                node = new Node(event, now);
+                policyStats.recordMiss();
+                policyStats.recordMissPenalty(event.missPenalty());
+
+                fetchStage.insert(event);
+                fetchedItems.put(key, node);
+                event.changeEventStatus(AccessEvent.EventStatus.MISS);
+            }
         } else {
             node.event.updateHitPenalty(event.hitPenalty());
             node.accessTime = now;
             node.frequency++;
-            recordAccordingToAvailability(node.event, event);
+            event.changeEventStatus(AccessEvent.EventStatus.HIT);
+            policyStats.recordHit();
+            policyStats.recordHitPenalty(event.hitPenalty());
         }
         policyStats.recordOperation();
     }
 
-    private void recordAccordingToAvailability(AccessEvent entryEvent, AccessEvent currEvent) {
-        boolean isAvailable = entryEvent.isAvailableAt(currEvent.getRequestTime());
-        if (isAvailable) {
-            currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
-            policyStats.recordHit();
-            policyStats.recordHitPenalty(currEvent.hitPenalty());
-        } else {
-            currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
-            currEvent.setDelayedHitPenalty(entryEvent.getAvailabilityTime());
-            policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
-            policyStats.recordDelayedHit();
+    private void insertArrivals(double timeStamp) {
+        while (fetchStage.size() > 0 && fetchStage.getClosestArrival() < timeStamp) {
+            AccessEvent arrivedEvent = fetchStage.extractClosestArrival();
+            long key = arrivedEvent.key();
+            Node node = fetchedItems.remove(key);
+            int idx = data.size();
+            node.index = idx;
+            table[idx] = node;
+            data.put(key, node);
+            evict(node);
         }
     }
 
@@ -198,6 +220,8 @@ public class HyperbolicPolicy implements Policy {
     }
 
     static final class Node {
+        final static int NO_INDEX = -1;
+
         final long key;
         final long insertionTime;
         AccessEvent event;
@@ -205,19 +229,14 @@ public class HyperbolicPolicy implements Policy {
         int frequency;
         int index;
 
-        public Node(AccessEvent event, int index, long tick) {
+        public Node(AccessEvent event, long tick) {
             this.event = event;
             this.insertionTime = tick;
             this.accessTime = tick;
-            this.index = index;
+            this.index = NO_INDEX;
             this.key = event.key();
         }
-        /**
-         * Updates the node's event without moving it
-         */
-        public void updateEvent(AccessEvent e) {
-            event = e;
-        }
+
         @Override
         public String toString() {
             return MoreObjects.toStringHelper(this)
