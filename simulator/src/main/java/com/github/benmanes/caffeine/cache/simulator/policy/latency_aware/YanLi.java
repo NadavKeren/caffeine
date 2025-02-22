@@ -5,12 +5,13 @@ import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.FetchStage;
 import com.typesafe.config.Config;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.HashMap;
-import java.util.Map;
 
 /***
  * A cache based on the work of G.Yan and J.Li published at ATC22:
@@ -21,43 +22,65 @@ import java.util.Map;
 @Policy.PolicySpec(name = "latency-aware.YanLi")
 public class YanLi implements Policy {
     final protected static int MAX_INTER_ARRIVAL_TIMES = 20;
-    final private static int DEFAULT_SIZE = 1 << 15;
-    final private static float DEFAULT_LOAD_FACTOR = 1.5f;
+    final private static float DEFAULT_LOAD_FACTOR = 0.75f;
 
     private final int cacheSize;
+    final private FetchStage fetchStage;
 
     final private PolicyStats stats;
 
-    final private Map<Long, Entry> items;
+    final private Long2ObjectMap<Entry> items;
+    private int size = 0;
 
     public YanLi(Config config) {
-        items = new HashMap<>(DEFAULT_SIZE, DEFAULT_LOAD_FACTOR);
         stats = new PolicyStats("Yan-Li Cache-LA");
         BasicSettings settings = new BasicSettings(config);
         this.cacheSize = (int) settings.maximumSize();
+        items = new Long2ObjectOpenHashMap<>((int) (this.cacheSize / DEFAULT_LOAD_FACTOR), DEFAULT_LOAD_FACTOR);
+        fetchStage = new FetchStage(this.cacheSize * 10);
     }
 
     @Override
     public void record(AccessEvent event) {
         final long key = event.key();
 
-        Entry entry = items.get(key);
-        if (entry != null) {
-            entry.addArrival(event.getRequestTime());
-            recordAccordingToAvailability(entry, event);
+        insertArrivals(event.getRequestTime());
+
+        if (fetchStage.contains(key)) {
+            onFetchStageHit(event);
         } else {
-            stats.recordMiss();
-            stats.recordMissPenalty(event.missPenalty());
+            Entry entry = items.get(key);
+            if (entry != null) {
+                entry.addArrival(event.getRequestTime());
+                event.changeEventStatus(AccessEvent.EventStatus.HIT);
+                stats.recordHit();
+                stats.recordHitPenalty(event.hitPenalty());
+            } else {
+                stats.recordMiss();
+                stats.recordMissPenalty(event.missPenalty());
 
-            Entry newEntry = new Entry(event);
-            items.put(key, newEntry);
+                Entry newEntry = new Entry(event);
+                items.put(key, newEntry);
 
-            if (items.size() > cacheSize) {
+                fetchStage.insert(event);
+            }
+        }
+    }
+
+    private void insertArrivals(double timestamp) {
+        while (fetchStage.size() > 0 && fetchStage.getClosestArrival() < timestamp) {
+            AccessEvent arrivedEvent = fetchStage.extractClosestArrival();
+            Entry entry = items.get(arrivedEvent.key());
+            entry.makeAvailable();
+            ++size;
+
+            if (size > cacheSize) {
                 evict();
             }
         }
     }
 
+    @SuppressWarnings("deprecation")
     private void evict() {
         stats.recordEviction();
 
@@ -65,35 +88,34 @@ public class YanLi implements Policy {
         long victim = Long.MAX_VALUE;
 
         for (var mapEntry : items.entrySet()) {
-            double itemScore = mapEntry.getValue().score();
-            if (itemScore < minVal) {
-                victim = mapEntry.getKey();
-                minVal = itemScore;
+            if (mapEntry.getValue().isAvailable()) {
+                double itemScore = mapEntry.getValue().score();
+                if (itemScore < minVal) {
+                    victim = mapEntry.getKey();
+                    minVal = itemScore;
+                }
             }
         }
 
         Assert.assertCondition(minVal < Double.MAX_VALUE && victim != Long.MAX_VALUE, "No victim chosen!");
 
         items.remove(victim);
+        --size;
     }
 
-    private void recordAccordingToAvailability(Entry entry, AccessEvent currEvent) {
-        boolean isAvailable = entry.event().isAvailableAt(currEvent.getRequestTime());
-        if (isAvailable) {
-            currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
-            stats.recordHit();
-            stats.recordHitPenalty(currEvent.hitPenalty());
-        } else {
-            currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
-            currEvent.setDelayedHitPenalty(entry.event().getAvailabilityTime());
-            stats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
-            stats.recordDelayedHit();
-        }
+    private void onFetchStageHit(AccessEvent pendingEvent) {
+        AccessEvent fetchingEvent = fetchStage.get(pendingEvent.key());
+
+        pendingEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+        pendingEvent.setDelayedHitPenalty(fetchingEvent.getAvailabilityTime());
+
+        stats.recordDelayedHit();
+        stats.recordDelayedHitPenalty(pendingEvent.delayedHitPenalty());
     }
 
     @Override
     public void finished() {
-        Assert.assertCondition(items.size() <= cacheSize, "Cache overflow");
+        Assert.assertCondition(size <= cacheSize, "Cache overflow");
     }
 
     @Override
@@ -102,13 +124,14 @@ public class YanLi implements Policy {
     }
 
     private static class Entry {
-
+        private boolean isAvailable;
         final private AccessEvent event;
         final private Deque<Double> interArrivalTimes;
         double estimate;
         double lastArrivalTime;
 
         public Entry(AccessEvent event) {
+            this.isAvailable = false;
             this.event = event;
             this.interArrivalTimes = new ArrayDeque<>();
             this.lastArrivalTime = event.getRequestTime();
@@ -146,6 +169,12 @@ public class YanLi implements Policy {
             return numerator / denominator;
         }
 
-        public AccessEvent event() { return event; }
+        public void makeAvailable() {
+            this.isAvailable = true;
+        }
+
+        public boolean isAvailable() {
+            return isAvailable;
+        }
     }
 }
