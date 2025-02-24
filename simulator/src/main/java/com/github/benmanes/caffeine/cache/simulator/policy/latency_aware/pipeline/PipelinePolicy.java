@@ -38,7 +38,7 @@ public class PipelinePolicy implements Policy {
     final public static PipelinePolicy DUMMY = new DummyPipeline();
 
     private PolicyStats stats;
-    final private FetchStage fetchingStage;
+    private FetchStage fetchingStage;
     final private PipelineBlock[] blocks;
     final private int[] quota;
     final private int totalQuanta;
@@ -58,8 +58,8 @@ public class PipelinePolicy implements Policy {
     /*
      * TODO: nkeren: consult Ben regarding how to share these with only one party making the updates.
      */
-    final private LatencyEstimator latencyEstimator;
-    final private LatencyEstimator burstEstimator;
+    private LatencyEstimator latencyEstimator;
+    private LatencyEstimator burstEstimator;
 
     private PipelinePolicy() {
         this.fetchingStage = null;
@@ -199,6 +199,10 @@ public class PipelinePolicy implements Policy {
             block.copyInto(other.blocks[blockIdx]);
             other.quota[blockIdx] = this.quota[blockIdx];
             ++blockIdx;
+
+            other.fetchingStage = new FetchStage(this.fetchingStage);
+            other.latencyEstimator = this.latencyEstimator.createDeepCopy();
+            other.burstEstimator = this.burstEstimator.createDeepCopy();
         }
     }
 
@@ -273,14 +277,14 @@ public class PipelinePolicy implements Policy {
         this.dumper = null;
         this.opDumpWriter = null;
 
-        this.fetchingStage = new FetchStage(10 * cacheCapacity);
+        this.fetchingStage = new FetchStage(source.fetchingStage);
         this.isDummy = false;
 
         this.blocks = new PipelineBlock[blockCount];
         this.quota = new int[blockCount];
 
-        this.latencyEstimator = new UneditableLatencyEstimatorProxy(source.latencyEstimator);
-        this.burstEstimator = new UneditableLatencyEstimatorProxy(source.burstEstimator);
+        this.latencyEstimator = source.latencyEstimator.createDeepCopy();
+        this.burstEstimator = source.burstEstimator.createDeepCopy();
 
         for (int i = 0; i < blockCount; ++i) {
             blocks[i] = source.blocks[i].createCopy();

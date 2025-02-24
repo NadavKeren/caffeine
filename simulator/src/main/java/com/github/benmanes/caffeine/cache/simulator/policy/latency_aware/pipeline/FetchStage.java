@@ -24,6 +24,13 @@ public class FetchStage {
         this.maxSize = maxSize;
     }
 
+    public FetchStage(FetchStage other) {
+        this.heap = Arrays.copyOf(other.heap, other.heap.length);
+        this.valuesMap = new Long2ObjectOpenHashMap<>(other.valuesMap);
+        this.size = other.size;
+        this.maxSize = other.maxSize;
+    }
+
     public void insert(AccessEvent event) {
         Assert.assertCondition(this.size <= this.heap.length, "Insertion into a full Fetch Stage");
         this.heap[this.size++] = new KeyAndAvailabilityTimePair(event.key(), event.getAvailabilityTime());

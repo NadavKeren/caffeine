@@ -2,6 +2,7 @@ package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeli
 
 import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 
 public class MovingAverageBurstEstimator implements LatencyEstimator {
@@ -23,6 +24,26 @@ public class MovingAverageBurstEstimator implements LatencyEstimator {
         this.ageSmoothingFactor = ageSmoothingFactor;
         this.numOfPartitions = numOfPartitions;
         this.maxSize = maxSize;
+    }
+
+    private MovingAverageBurstEstimator(MovingAverageBurstEstimator source) {
+        this.agingWindowSize = source.agingWindowSize;
+        this.ageSmoothingFactor = source.ageSmoothingFactor;
+        this.numOfPartitions = source.numOfPartitions;
+        this.maxSize = source.maxSize;
+
+        this.storedValues = new Long2ObjectOpenHashMap<>(maxSize, LOAD_FACTOR);
+        var itr = Long2ObjectMaps.fastIterator(source.storedValues);
+
+        while (itr.hasNext()) {
+            var item = itr.next();
+            this.storedValues.put(item.getLongKey(), new Entry(item.getValue()));
+        }
+    }
+
+    @Override
+    public LatencyEstimator createDeepCopy() {
+        return new MovingAverageBurstEstimator(this);
     }
 
     @Override
@@ -96,6 +117,20 @@ public class MovingAverageBurstEstimator implements LatencyEstimator {
             this.latency = latency;
             agingWindowDuration = latency * agingWindowSize;
             partitionLength = (long) latency / numOfPartitions;
+        }
+
+        public Entry(Entry source) {
+            this.virtualFetchTimestamps = new long[source.virtualFetchTimestamps.length];
+            System.arraycopy(source.virtualFetchTimestamps, 0, this.virtualFetchTimestamps, 0, source.virtualFetchTimestamps.length);
+            this.accumulators = new double[source.accumulators.length];
+            System.arraycopy(source.accumulators, 0, this.accumulators, 0, source.accumulators.length);
+            this.size = source.size;
+
+            this.latency = source.latency;
+            this.lastUpdateTime = source.lastUpdateTime;
+            this.agingWindowDuration = source.agingWindowDuration;
+            this.partitionLength = source.partitionLength;
+            this.value = source.value;
         }
 
         private void ageValueIfNeeded(long timestamp) {

@@ -8,10 +8,20 @@ public class LatestLatencyEstimator implements LatencyEstimator {
     private final static float LOAD_FACTOR = 0.875f;
     final private Long2DoubleOpenHashMap storedValues;
 
-    private double hitPenalty = 1;
+    private double hitPenalty = 0;
 
     public LatestLatencyEstimator() {
         this.storedValues = new Long2DoubleOpenHashMap(INITIAL_SIZE, LOAD_FACTOR);
+    }
+
+    public LatestLatencyEstimator(LatestLatencyEstimator origin) {
+        this.hitPenalty = origin.hitPenalty;
+        this.storedValues = new Long2DoubleOpenHashMap(origin.storedValues);
+    }
+
+    @Override
+    public LatencyEstimator createDeepCopy() {
+        return new LatestLatencyEstimator(this);
     }
 
     @Override

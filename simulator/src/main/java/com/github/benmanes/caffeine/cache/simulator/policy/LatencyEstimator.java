@@ -28,4 +28,6 @@ public interface LatencyEstimator {
     default void remove(long key) {}
 
     default int size() { throw new UnsupportedOperationException(); }
+
+    default LatencyEstimator createDeepCopy() { throw new UnsupportedOperationException("No copy defined"); }
 }
