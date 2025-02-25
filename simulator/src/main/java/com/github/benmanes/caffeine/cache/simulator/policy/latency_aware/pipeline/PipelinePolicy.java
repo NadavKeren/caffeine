@@ -15,6 +15,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.ApproximateWit
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigException;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -49,8 +50,10 @@ public class PipelinePolicy implements Policy {
     private boolean isDummy;
     final private boolean isCopy;
 
-    private double timeframePenalty = 0;
-    private int timeframeOpCount = 0;
+    @Nonnull final private TimeframeStats timeframeStats;
+
+//    private double timeframePenalty = 0;
+//    private int timeframeOpCount = 0;
 
     @Nullable private PrintWriter dumper = null;
     @Nullable private PrintWriter opDumpWriter = null;
@@ -74,6 +77,7 @@ public class PipelinePolicy implements Policy {
         this.burstEstimator = null;
         this.isDummy = true;
         this.isCopy = true;
+        this.timeframeStats = new TimeframeStats();
     }
 
     /***
@@ -117,6 +121,7 @@ public class PipelinePolicy implements Policy {
         }
 
         stats = new PolicyStats(generatePipelineName());
+        timeframeStats = new TimeframeStats();
 
         try {
             if (DEBUG) {
@@ -181,12 +186,12 @@ public class PipelinePolicy implements Policy {
             this.blocks[i].clear();
         }
 
-        this.isDummy = false;
         if (this.fetchingStage != null) {
             this.fetchingStage.clear();
         }
 
         stats = new PolicyStats(generatePipelineName());
+        timeframeStats.clear();
     }
 
     public void copyInto(PipelinePolicy other) {
@@ -204,6 +209,7 @@ public class PipelinePolicy implements Policy {
             other.latencyEstimator = this.latencyEstimator.createDeepCopy();
             other.burstEstimator = this.burstEstimator.createDeepCopy();
         }
+        other.timeframeStats.clear();
     }
 
     public String generatePipelineName() {
@@ -272,8 +278,7 @@ public class PipelinePolicy implements Policy {
         this.blockCount = source.blockCount;
         this.quantumSize = source.quantumSize;
         this.cacheCapacity = source.cacheCapacity;
-        this.timeframePenalty = 0;
-        this.timeframeOpCount = 0;
+        this.timeframeStats = new TimeframeStats();
         this.dumper = null;
         this.opDumpWriter = null;
 
@@ -366,8 +371,7 @@ public class PipelinePolicy implements Policy {
         stats.recordMiss();
         stats.recordMissPenalty(event.missPenalty());
 
-        ++this.timeframeOpCount;
-        this.timeframePenalty += event.missPenalty();
+        this.timeframeStats.recordMiss(event.missPenalty());
 
         for (int idx = 0; idx < blockCount; ++idx) {
             blocks[idx].onMiss(event.key());
@@ -439,12 +443,11 @@ public class PipelinePolicy implements Policy {
         stats.recordHit();
         stats.recordHitPenalty(currEvent.hitPenalty());
         burstEstimator.addValueToRecord(currEvent.key(), 0, currEvent.getRequestTime());
-        this.timeframePenalty += currEvent.hitPenalty();
 
         latencyEstimator.recordHit(currEvent.hitPenalty());
         burstEstimator.recordHit(currEvent.hitPenalty());
 
-        ++this.timeframeOpCount;
+        this.timeframeStats.recordHit(currEvent.hitPenalty());
     }
 
     private void onHitAtFetchStage(AccessEvent fetchEvent, AccessEvent pendingEvent) {
@@ -454,7 +457,7 @@ public class PipelinePolicy implements Policy {
         stats.recordDelayedHitPenalty(pendingEvent.delayedHitPenalty());
         stats.recordDelayedHit();
 
-        this.timeframePenalty += pendingEvent.delayedHitPenalty();
+        this.timeframeStats.recordDelayed(pendingEvent.delayedHitPenalty());
 
         latencyEstimator.addValueToRecord(pendingEvent.key(),
                                           pendingEvent.delayedHitPenalty(),
@@ -469,11 +472,11 @@ public class PipelinePolicy implements Policy {
             return Double.MAX_VALUE;
         }
 
-        final double res = this.timeframePenalty / this.timeframeOpCount;
-        this.timeframePenalty = 0;
-        this.timeframeOpCount = 0;
+        return this.timeframeStats.avgPenalty();
+    }
 
-        return res;
+    public String getTimeframeStats() {
+        return this.timeframeStats.getStats();
     }
 
     public void moveQuantum(int incIdx, int decIdx) {
@@ -494,12 +497,20 @@ public class PipelinePolicy implements Policy {
         this.isDummy = true;
     }
 
+    public boolean isDummy() {
+        return this.isDummy;
+    }
+
     @Override
     public void dump() {
         if (opDumpWriter != null) {
             opDumpWriter.flush();
             opDumpWriter.close();
         }
+    }
+
+    public int[] getQuota() {
+        return Arrays.copyOf(quota, quota.length);
     }
 
     public PipelineState getCurrentState() {
@@ -635,5 +646,58 @@ public class PipelinePolicy implements Policy {
         public boolean canShrink(int idx) {
             return false;
         }
+    }
+
+    private class TimeframeStats {
+        private int hitCount = 0;
+        private int delayedCount = 0;
+        private int missCount = 0;
+        private double penalty = 0d;
+
+        public void recordHit(double penalty) {
+            hitCount++;
+            this.penalty += penalty;
+        }
+
+        public void recordMiss(double penalty) {
+            missCount++;
+            this.penalty += penalty;
+        }
+
+        public void recordDelayed(double penalty) {
+            delayedCount++;
+            this.penalty += penalty;
+        }
+
+        public void clear() {
+            hitCount = 0;
+            delayedCount = 0;
+            missCount = 0;
+            penalty = 0d;
+        }
+
+        public String getStats() {
+            StringBuilder sb = new StringBuilder();
+
+            int total = totalCount();
+
+
+            sb.append(String.format("\thits: %d %.2f", hitCount, 100d * hitCount / total));
+            sb.append(String.format("\tdelayed: %d %.2f", delayedCount, 100d * delayedCount / total));
+            sb.append(String.format("\tmiss: %d %.2f", missCount, 100d * missCount / total));
+            sb.append(String.format("\tavg. pen: %.2f", avgPenalty()));
+            if (!isDummy) {
+                for (PipelineBlock block : blocks) {
+                    sb.append(String.format("\t%s: used: %d", block.type(), block.size()));
+                }
+            }
+
+            clear();
+            return sb.toString();
+        }
+
+        private int totalCount() { return hitCount + delayedCount + missCount; }
+
+        public double avgPenalty() { return  penalty / totalCount(); }
     }
 }

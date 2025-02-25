@@ -92,6 +92,7 @@ public class PolicyStats {
         .type(PERCENT)
         .build());
     addPercentMetric("Adaption", this::percentAdaption);
+    addMetric(Metric.of("Total Penalty", (DoubleSupplier) this::totalPenalty, NUMBER, true));
     addMetric(Metric.of("Average Miss Penalty", (DoubleSupplier) this::averageMissPenalty, NUMBER, true));
     addMetric(Metric.of("Average Penalty", (DoubleSupplier) this::averagePenalty, NUMBER, true));
     addMetric("Standard Deviation", this::stdDev);
