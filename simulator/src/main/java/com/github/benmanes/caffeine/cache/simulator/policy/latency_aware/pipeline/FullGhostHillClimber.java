@@ -2,6 +2,7 @@ package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeli
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
 import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
+import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.ConsoleColors;
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
@@ -21,7 +22,9 @@ import java.util.List;
 @Policy.PolicySpec(name = "latency-aware.FGHC")
 public class FullGhostHillClimber implements Policy {
     private final static boolean DUMP_QUOTAS = true;
+    private final static boolean DEBUG = false;
     @Nullable private PrintWriter quotaDump = null;
+    @Nullable private PrintWriter logger = null;
 
     private final PipelinePolicy mainPipeline;
     private final List<Pair<PipelinePolicy, CacheDiff>> ghostCaches;
@@ -43,20 +46,29 @@ public class FullGhostHillClimber implements Policy {
         final int numOfCaches = blockCount * (blockCount - 1);
         ghostCaches = new ArrayList<>(numOfCaches);
 
-        createGhostCaches();
-
 
         if (DUMP_QUOTAS) {
-             prepareQuotaDump();
+            prepareQuotaDump();
         }
+
+        if (DEBUG) {
+            prepareLog();
+        }
+
+        createGhostCaches(0);
     }
 
-    private void createGhostCaches() {
+    private void createGhostCaches(int eventNum) {
         for (var pair : ghostCaches) {
             pair.first().clear();
         }
 
         ghostCaches.clear();
+
+        if (logger != null) {
+            logger.println(ConsoleColors.colorString(eventNum + ":\tEmptying the ghost caches", ConsoleColors.PURPLE_BOLD));
+            logger.println(ConsoleColors.colorString(eventNum + ":\tCurrent Cache configuration: " + Arrays.toString(mainPipeline.getQuota()), ConsoleColors.CYAN_BOLD));
+        }
 
         int idx = 0;
         for (int inc = 0; inc < blockCount; ++inc) {
@@ -67,11 +79,19 @@ public class FullGhostHillClimber implements Policy {
                     if (mainPipeline.canExtend(inc) && mainPipeline.canShrink(dec)) {
                         cache = mainPipeline.createCopy();
                         cache.moveQuantum(inc, dec);
+
+                        if (logger != null) {
+                            logger.printf("%d:\tCreated ghost cache %d: %s\n", eventNum, idx, Arrays.toString(cache.getQuota()));
+                        }
                     }
                     ghostCaches.add(idx, new ObjectObjectImmutablePair<>(cache, diff));
                     ++idx;
                 }
             }
+        }
+
+        if (logger != null) {
+            logger.println(ConsoleColors.colorString(eventNum + ":\tGhost creation ended", ConsoleColors.PURPLE_BOLD));
         }
     }
 
@@ -113,11 +133,26 @@ public class FullGhostHillClimber implements Policy {
 
     private void adapt(int eventNum) {
         final double currentAvg = this.mainPipeline.getTimeframeAveragePenalty();
+        if (logger != null) {
+            logger.println(ConsoleColors.colorString(eventNum + ":\tmain cache: " + this.mainPipeline.getTimeframeStats(), ConsoleColors.YELLOW));
+        } else {
+            this.mainPipeline.getTimeframeStats();
+        }
+
         double minAvg = currentAvg;
         int minIdx = -1;
 
+        double[] timeframeResults = new double[this.ghostCaches.size()];
+
         for (int idx = 0; idx < this.ghostCaches.size(); ++idx) {
             double currGhostAvg = this.ghostCaches.get(idx).first().getTimeframeAveragePenalty();
+            if (logger != null && !this.ghostCaches.get(idx).first().isDummy()) {
+                logger.println(ConsoleColors.colorString(eventNum + ":\tghost cache " + idx + ": " + this.ghostCaches.get(idx).first().getTimeframeStats(), ConsoleColors.BLUE));
+            } else {
+                this.mainPipeline.getTimeframeStats();
+            }
+
+            timeframeResults[idx] = currGhostAvg;
             if (currGhostAvg < minAvg) {
                 minAvg = currGhostAvg;
                 minIdx = idx;
@@ -133,15 +168,32 @@ public class FullGhostHillClimber implements Policy {
                                                        this.mainPipeline.getType(adaption.decIdx)));
 
             this.mainPipeline.moveQuantum(adaption.incIdx, adaption.decIdx);
-            var currState = this.mainPipeline.getCurrentState();
-            var currCacheState = new CacheState(eventNum, currState.quotas, currentAvg);
 
-            if (DUMP_QUOTAS && quotaDump != null) {
-                quotaDump.println(currCacheState.toString());
-                quotaDump.flush();
+            if (logger != null) {
+                logger.println(ConsoleColors.colorString(eventNum + ":\tIncreasing: " + adaption.incIdx + "\tDecreasing: " + adaption.decIdx, ConsoleColors.GREEN_BOLD));
             }
 
-            createGhostCaches();
+
+            createGhostCaches(eventNum);
+        }
+
+        if (DUMP_QUOTAS && quotaDump != null) {
+            var currState = this.mainPipeline.getCurrentState();
+            var currCacheState = new CacheState(eventNum, currState.quotas, currentAvg);
+            quotaDump.print(currCacheState);
+            quotaDump.print(",");
+            for (int idx = 0; idx < this.ghostCaches.size(); ++idx) {
+                if (!ghostCaches.get(idx).first().isDummy()) {
+                    quotaDump.print(String.format("%.2f", timeframeResults[idx]));
+                } else {
+                    quotaDump.print("NA");
+                }
+                if (idx != this.ghostCaches.size() - 1) {
+                    quotaDump.print(",");
+                }
+            }
+            quotaDump.println();
+            quotaDump.flush();
         }
     }
 
@@ -155,6 +207,18 @@ public class FullGhostHillClimber implements Policy {
         try {
             FileWriter fwriter = new FileWriter(currentDir + "/FGHC.quota-dump", StandardCharsets.UTF_8);
             quotaDump = new PrintWriter(fwriter);
+        } catch (IOException e) {
+            System.err.println("Error creating the log file handler");
+            e.printStackTrace();
+            System.exit(1);
+        }
+    }
+
+    private void prepareLog() {
+        String currentDir = System.getProperty("user.dir");
+        try {
+            FileWriter fwriter = new FileWriter(currentDir + "/FGHC.log", StandardCharsets.UTF_8);
+             logger = new PrintWriter(fwriter);
         } catch (IOException e) {
             System.err.println("Error creating the log file handler");
             e.printStackTrace();
