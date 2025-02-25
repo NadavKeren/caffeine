@@ -137,20 +137,20 @@ public class AdaptivePipelineCache implements Policy {
         PipelineBlock block = null;
 
         switch (type) {
-            case "LRU":
-                block = new LruBlock(blockConfig,
-                                     new UneditableLatencyEstimatorProxy(latencyEstimator),
-                                     quantumSize,
-                                     quota);
+            case "LA-LRU":
+                block = new LALruBlock(blockConfig,
+                                       new UneditableLatencyEstimatorProxy(latencyEstimator),
+                                       quantumSize,
+                                       quota);
                 break;
-            case "BC":
-                block = new LBUBlock(new UneditableLatencyEstimatorProxy(burstEstimator),
+            case "LBU":
+                block = new LbuBlock(new UneditableLatencyEstimatorProxy(burstEstimator),
                                      cacheCapacity,
                                      quantumSize,
                                      quota);
                 break;
-            case "LFU":
-                block = new LfuBlock(generalConfig, blockConfig, latencyEstimator, quantumSize, quota);
+            case "LA-LFU":
+                block = new LALfuBlock(generalConfig, blockConfig, latencyEstimator, quantumSize, quota);
                 break;
             default:
                 throw new IllegalStateException("No such type: " + type);

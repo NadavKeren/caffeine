@@ -15,7 +15,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public class LfuBlock implements PipelineBlock {
+public class LALfuBlock implements PipelineBlock {
     final private int quantumSize;
     final private Admittor admittor;
     final private CraBlock protectedBlock;
@@ -30,13 +30,13 @@ public class LfuBlock implements PipelineBlock {
     protected int maxDeltaCounts = 0;
     protected int samplesCount = 0;
 
-    public LfuBlock(Config config,
-                    Config blockConfig,
-                    LatencyEstimator latencyEstimator,
-                    int quantumSize,
-                    int initialQuota) {
+    public LALfuBlock(Config config,
+                      Config blockConfig,
+                      LatencyEstimator latencyEstimator,
+                      int quantumSize,
+                      int initialQuota) {
         this.quantumSize = quantumSize;
-        var settings = new LfuBlockSettings(blockConfig);
+        var settings = new LALfuBlockSettings(blockConfig);
         final double decayFactor = settings.decayFactor();
         final int maxLists = settings.maxLists();
         this.latencyEstimator = latencyEstimator;
@@ -103,7 +103,7 @@ public class LfuBlock implements PipelineBlock {
         return items;
     }
 
-    private LfuBlock(LfuBlock other) {
+    private LALfuBlock(LALfuBlock other) {
         this.quantumSize = other.quantumSize;
         this.capacity = other.capacity;
         this.admittor = new UneditableAdmittorProxy(other.admittor);
@@ -115,11 +115,11 @@ public class LfuBlock implements PipelineBlock {
 
     @Override
     public void copyInto(PipelineBlock other) {
-        Assert.assertCondition(other instanceof LfuBlock,
+        Assert.assertCondition(other instanceof LALfuBlock,
                                () -> String.format("Got wrong block type: expected: %s\tgot: %s",
                                                    this.type(),
                                                    other.type()));
-        LfuBlock casted = (LfuBlock) other;
+        LALfuBlock casted = (LALfuBlock) other;
 
         this.protectedBlock.copyInto(casted.protectedBlock);
         this.probationBlock.copyInto(casted.probationBlock);
@@ -149,7 +149,7 @@ public class LfuBlock implements PipelineBlock {
 
     @Override
     public PipelineBlock createCopy() {
-        return new LfuBlock(this);
+        return new LALfuBlock(this);
     }
 
     /*
@@ -249,7 +249,7 @@ public class LfuBlock implements PipelineBlock {
 
         Assert.assertCondition(protectedBlock.size() <= protectedBlock.capacity()
                                && probationBlock.size() + protectedBlock.size() <= this.capacity(),
-                               "LFU: Size overflow");
+                               "LA-LFU: Size overflow");
 
         Assert.assertCondition(sizeBefore < capacity() || evicted != null, "Got no evicted item when the cache is full");
 
@@ -282,11 +282,11 @@ public class LfuBlock implements PipelineBlock {
 
     @Override
     public String type() {
-        return "LFU";
+        return "LA-LFU";
     }
 
-    private static class LfuBlockSettings extends BasicSettings {
-        public LfuBlockSettings(Config config) {
+    private static class LALfuBlockSettings extends BasicSettings {
+        public LALfuBlockSettings(Config config) {
             super(config);
         }
 

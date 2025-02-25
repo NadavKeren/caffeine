@@ -233,24 +233,24 @@ public class PipelinePolicy implements Policy {
         PipelineBlock block;
 
         switch (type) {
-            case "LRU":
-                block = new LruBlock(blockConfig,
-                                     new UneditableLatencyEstimatorProxy(latencyEstimator),
-                                     quantumSize,
-                                     quota);
+            case "LA-LRU":
+                block = new LALruBlock(blockConfig,
+                                       new UneditableLatencyEstimatorProxy(latencyEstimator),
+                                       quantumSize,
+                                       quota);
                 break;
             case "LBU":
-                block = new LBUBlock(new UneditableLatencyEstimatorProxy(burstEstimator),
+                block = new LbuBlock(new UneditableLatencyEstimatorProxy(burstEstimator),
                                      cacheCapacity,
                                      quantumSize,
                                      quota);
                 break;
-            case "LFU":
-                block = new LfuBlock(generalConfig,
-                                     blockConfig,
-                                     new UneditableLatencyEstimatorProxy(latencyEstimator),
-                                     quantumSize,
-                                     quota);
+            case "LA-LFU":
+                block = new LALfuBlock(generalConfig,
+                                       blockConfig,
+                                       new UneditableLatencyEstimatorProxy(latencyEstimator),
+                                       quantumSize,
+                                       quota);
 
                 break;
             default:

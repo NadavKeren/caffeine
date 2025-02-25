@@ -10,7 +10,7 @@ import com.typesafe.config.Config;
 import javax.annotation.Nullable;
 import java.util.List;
 
-public class LruBlock implements PipelineBlock {
+public class LALruBlock implements PipelineBlock {
     final private int quantumSize;
     final private CraBlock block;
 
@@ -22,7 +22,7 @@ public class LruBlock implements PipelineBlock {
     protected int maxDeltaCounts = 0;
     protected int samplesCount = 0;
 
-    public LruBlock(Config config, LatencyEstimator latencyEstimator, int quantumSize, int initialQuota) {
+    public LALruBlock(Config config, LatencyEstimator latencyEstimator, int quantumSize, int initialQuota) {
         this.quantumSize = quantumSize;
         this.latencyEstimator = latencyEstimator;
 
@@ -32,7 +32,7 @@ public class LruBlock implements PipelineBlock {
 
         final int capacity = initialQuota * quantumSize;
 
-        this.block = new CraBlock(decayFactor, maxLists, capacity, latencyEstimator, "LRU-Block");
+        this.block = new CraBlock(decayFactor, maxLists, capacity, latencyEstimator, "LA-LRU-Block");
     }
 
     @Override
@@ -47,9 +47,9 @@ public class LruBlock implements PipelineBlock {
         return block.decreaseSize(quantumSize);
     }
 
-    private LruBlock(LruBlock other) {
+    private LALruBlock(LALruBlock other) {
         this.quantumSize = other.quantumSize;
-        this.block = other.block.createGhostCopy("LRU copy");
+        this.block = other.block.createGhostCopy("LA-LRU copy");
         this.latencyEstimator = other.latencyEstimator;
     }
 
@@ -65,11 +65,11 @@ public class LruBlock implements PipelineBlock {
 
     @Override
     public void copyInto(PipelineBlock other) {
-        Assert.assertCondition(other instanceof LruBlock,
+        Assert.assertCondition(other instanceof LALruBlock,
                                () -> String.format("Got wrong block type: expected: %s\tgot: %s",
                                                    this.type(),
                                                    other.type()));
-        LruBlock casted = (LruBlock) other;
+        LALruBlock casted = (LALruBlock) other;
 
         this.block.copyInto(casted.block);
 
@@ -82,7 +82,7 @@ public class LruBlock implements PipelineBlock {
 
     @Override
     public PipelineBlock createCopy() {
-        return new LruBlock(this);
+        return new LALruBlock(this);
     }
 
     @Nullable
@@ -168,7 +168,7 @@ public class LruBlock implements PipelineBlock {
 
     @Override
     public String type() {
-        return "LRU";
+        return "LA-LRU";
     }
 
     private static class LruBlockSettings extends BasicSettings {
