@@ -239,17 +239,14 @@ public class PipelinePolicy implements Policy {
         PipelineBlock block;
 
         switch (type) {
+            case "LRU":
+                block = new LruBlock(quota, quantumSize);
+                break;
             case "LA-LRU":
                 block = new LALruBlock(blockConfig,
                                        new UneditableLatencyEstimatorProxy(latencyEstimator),
                                        quantumSize,
                                        quota);
-                break;
-            case "LBU":
-                block = new LbuBlock(new UneditableLatencyEstimatorProxy(burstEstimator),
-                                     cacheCapacity,
-                                     quantumSize,
-                                     quota);
                 break;
             case "LA-LFU":
                 block = new LALfuBlock(generalConfig,
@@ -258,6 +255,12 @@ public class PipelinePolicy implements Policy {
                                        quantumSize,
                                        quota);
 
+                break;
+            case "LBU":
+                block = new LbuBlock(new UneditableLatencyEstimatorProxy(burstEstimator),
+                                     cacheCapacity,
+                                     quantumSize,
+                                     quota);
                 break;
             default:
                 throw new IllegalStateException("No such type: " + type);
