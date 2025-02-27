@@ -32,7 +32,7 @@ public class SampledHillClimber implements Policy {
     private final PolicyStats stats;
     private final int blockCount;
     private final int adaptionTimeframe;
-    private int sampledOpsSinceAdaption = 0;
+    private int opsSinceAdaption = 0;
     private final int sampleOrder;
 
     public SampledHillClimber(Config config) {
@@ -124,12 +124,12 @@ public class SampledHillClimber implements Policy {
                     cache.record(event);
                 }
             }
-
-            ++sampledOpsSinceAdaption;
         }
 
-        if (sampledOpsSinceAdaption >= adaptionTimeframe) {
-            sampledOpsSinceAdaption = 0;
+        ++opsSinceAdaption;
+
+        if (opsSinceAdaption >= adaptionTimeframe) {
+            opsSinceAdaption = 0;
             adapt(event.eventNum());
         }
     }
