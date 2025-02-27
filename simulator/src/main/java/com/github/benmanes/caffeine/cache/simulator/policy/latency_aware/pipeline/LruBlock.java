@@ -256,9 +256,11 @@ public class LruBlock implements PipelineBlock {
 
         @Override
         public String toString() {
-            return MoreObjects.toStringHelper(this)
+            return data != null
+                   ? MoreObjects.toStringHelper(this)
                               .add("key", data.key())
-                              .toString();
+                              .toString()
+                   : "Sentinel of LRU";
         }
     }
 }
