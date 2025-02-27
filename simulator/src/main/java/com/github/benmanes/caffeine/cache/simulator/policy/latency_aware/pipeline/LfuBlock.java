@@ -212,10 +212,14 @@ public class LfuBlock implements PipelineBlock {
             boolean shouldAdmit = admittor.admit(data.key(), victim.key());
 
             if (shouldAdmit) {
-                Node evicteeNode = probationHead.next;
+                Node evicteeNode = getVictimNode();
                 evicteeNode.remove();
                 this.items.remove(evicteeNode.data.key());
                 evicted = evicteeNode.data;
+                if (evicteeNode.queue == QueueType.PROTECTED) {
+                        --protectedSize;
+                        ++probationSize;
+                }
 
                 Node newItem = new Node(data, QueueType.PROBATION);
                 newItem.appendToTail(probationHead);
@@ -260,13 +264,13 @@ public class LfuBlock implements PipelineBlock {
 
         Assert.assertCondition(protectedSize <= protectedCapacity && size() <= cacheCapacity,
                                "LFU: Size overflow after promotion");
-//
+
 //        Assert.assertCondition(countItemsInList(probationHead) == probationSize, "Probation size mismatch after promotion");
 //        Assert.assertCondition(countItemsInList(protectedHead) == protectedSize, "Protected size mismatch after promotion");
     }
 
     private Node getVictimNode() {
-        return protectedCapacity < cacheCapacity ? probationHead.next : protectedHead.next;
+        return probationSize > 0 ? probationHead.next : protectedHead.next;
     }
 
     @Override
