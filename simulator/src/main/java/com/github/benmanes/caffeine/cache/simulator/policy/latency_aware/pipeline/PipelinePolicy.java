@@ -468,11 +468,11 @@ public class PipelinePolicy implements Policy {
     }
 
     public double getTimeframeAveragePenalty() {
-        if (isDummy) {
-            return Double.MAX_VALUE;
-        }
+        return isDummy ? Double.MAX_VALUE : this.timeframeStats.avgPenalty();
+    }
 
-        return this.timeframeStats.avgPenalty();
+    public double getTimeframeHitRatio() {
+        return isDummy ? Double.MAX_VALUE : this.timeframeStats.hitRatio();
     }
 
     public String getTimeframeStats() {
@@ -541,6 +541,10 @@ public class PipelinePolicy implements Policy {
     }
 
     public String getType(int idx) { return blocks[idx].type(); }
+
+    public void resetTimeframeStats() {
+        this.timeframeStats.clear();
+    }
 
     public static final class PipelineState {
         final public String[] types;
@@ -679,12 +683,12 @@ public class PipelinePolicy implements Policy {
         public String getStats() {
             StringBuilder sb = new StringBuilder();
 
-            int total = totalCount();
+            int totalCount = totalCount();
 
 
-            sb.append(String.format("\thits: %d %.2f", hitCount, 100d * hitCount / total));
-            sb.append(String.format("\tdelayed: %d %.2f", delayedCount, 100d * delayedCount / total));
-            sb.append(String.format("\tmiss: %d %.2f", missCount, 100d * missCount / total));
+            sb.append(String.format("\thits: %d %.2f", hitCount, 100d * hitCount / totalCount));
+            sb.append(String.format("\tdelayed: %d %.2f", delayedCount, 100d * delayedCount / totalCount));
+            sb.append(String.format("\tmiss: %d %.2f", missCount, 100d * missCount / totalCount));
             sb.append(String.format("\tavg. pen: %.2f", avgPenalty()));
             if (!isDummy) {
                 for (PipelineBlock block : blocks) {
@@ -699,5 +703,7 @@ public class PipelinePolicy implements Policy {
         private int totalCount() { return hitCount + delayedCount + missCount; }
 
         public double avgPenalty() { return  penalty / totalCount(); }
+
+        public double hitRatio() { return 100d * hitCount / totalCount(); }
     }
 }

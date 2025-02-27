@@ -22,7 +22,7 @@ import java.util.List;
 @Policy.PolicySpec(name = "latency-aware.FGHC")
 public class FullGhostHillClimber implements Policy {
     private final static boolean DUMP_QUOTAS = true;
-    private final static boolean DEBUG = false;
+    private final static boolean DEBUG = true;
     @Nullable private PrintWriter quotaDump = null;
     @Nullable private PrintWriter logger = null;
 
@@ -47,15 +47,16 @@ public class FullGhostHillClimber implements Policy {
         ghostCaches = new ArrayList<>(numOfCaches);
 
 
-        if (DUMP_QUOTAS) {
-            prepareQuotaDump();
-        }
-
         if (DEBUG) {
             prepareLog();
         }
 
         createGhostCaches(0);
+
+        if (DUMP_QUOTAS) {
+            prepareQuotaDump();
+            dumpState(0, 0, 0,  new double[this.ghostCaches.size()]);
+        }
     }
 
     private void createGhostCaches(int eventNum) {
@@ -133,11 +134,12 @@ public class FullGhostHillClimber implements Policy {
 
     private void adapt(int eventNum) {
         final double currentAvg = this.mainPipeline.getTimeframeAveragePenalty();
+        final double currentHitRatio = this.mainPipeline.getTimeframeHitRatio();
         if (logger != null) {
             logger.println(ConsoleColors.colorString(eventNum + ":\tmain cache: " + this.mainPipeline.getTimeframeStats(), ConsoleColors.YELLOW));
-        } else {
-            this.mainPipeline.getTimeframeStats();
         }
+
+        this.mainPipeline.resetTimeframeStats();
 
         double minAvg = currentAvg;
         int minIdx = -1;
@@ -145,12 +147,14 @@ public class FullGhostHillClimber implements Policy {
         double[] timeframeResults = new double[this.ghostCaches.size()];
 
         for (int idx = 0; idx < this.ghostCaches.size(); ++idx) {
-            double currGhostAvg = this.ghostCaches.get(idx).first().getTimeframeAveragePenalty();
-            if (logger != null && !this.ghostCaches.get(idx).first().isDummy()) {
-                logger.println(ConsoleColors.colorString(eventNum + ":\tghost cache " + idx + ": " + this.ghostCaches.get(idx).first().getTimeframeStats(), ConsoleColors.BLUE));
-            } else {
-                this.mainPipeline.getTimeframeStats();
+            var currGhostCache = this.ghostCaches.get(idx).first();
+            double currGhostAvg = currGhostCache.getTimeframeAveragePenalty();
+            if (logger != null && !currGhostCache.isDummy()) {
+                logger.println(ConsoleColors.colorString(eventNum + ":\tghost cache " + idx + ": " + currGhostCache.getTimeframeStats(), ConsoleColors.BLUE));
             }
+
+            currGhostCache.resetTimeframeStats();
+
 
             timeframeResults[idx] = currGhostAvg;
             if (currGhostAvg < minAvg) {
@@ -178,23 +182,27 @@ public class FullGhostHillClimber implements Policy {
         }
 
         if (DUMP_QUOTAS && quotaDump != null) {
-            var currState = this.mainPipeline.getCurrentState();
-            var currCacheState = new CacheState(eventNum, currState.quotas, currentAvg);
-            quotaDump.print(currCacheState);
-            quotaDump.print(",");
-            for (int idx = 0; idx < this.ghostCaches.size(); ++idx) {
-                if (!ghostCaches.get(idx).first().isDummy()) {
-                    quotaDump.print(String.format("%.2f", timeframeResults[idx]));
-                } else {
-                    quotaDump.print("NA");
-                }
-                if (idx != this.ghostCaches.size() - 1) {
-                    quotaDump.print(",");
-                }
-            }
-            quotaDump.println();
-            quotaDump.flush();
+            dumpState(eventNum, currentAvg, currentHitRatio, timeframeResults);
         }
+    }
+
+    private void dumpState(int eventNum, double currentAvg, double currentHitRatio, double[] timeframeResults) {
+        var currState = this.mainPipeline.getCurrentState();
+        var currCacheState = new CacheState(eventNum, currState.quotas, currentAvg, currentHitRatio);
+        quotaDump.print(currCacheState);
+        quotaDump.print(",");
+        for (int idx = 0; idx < this.ghostCaches.size(); ++idx) {
+            if (!ghostCaches.get(idx).first().isDummy()) {
+                quotaDump.print(String.format("%.2f", timeframeResults[idx]));
+            } else {
+                quotaDump.print("NA");
+            }
+            if (idx != this.ghostCaches.size() - 1) {
+                quotaDump.print(",");
+            }
+        }
+        quotaDump.println();
+        quotaDump.flush();
     }
 
     @Override
@@ -255,13 +263,16 @@ public class FullGhostHillClimber implements Policy {
         private final int eventNum;
         private final int[] quotas;
         private final double avgPen;
+        private final double hitRatio;
 
         private CacheState(int eventNum,
                            int[] quotas,
-                           double avgPen) {
+                           double avgPen,
+                           double hitRatio) {
             this.eventNum = eventNum;
             this.quotas = Arrays.copyOf(quotas, quotas.length);
             this.avgPen = avgPen;
+            this.hitRatio = hitRatio;
         }
 
         @Override
@@ -276,7 +287,8 @@ public class FullGhostHillClimber implements Policy {
                 sb.append(',');
             }
 
-            sb.append(String.format("%.2f", avgPen));
+            sb.append(String.format("%.2f,", avgPen));
+            sb.append(String.format("%.2f", hitRatio));
 
             return sb.toString();
         }
