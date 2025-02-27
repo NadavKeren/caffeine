@@ -242,6 +242,9 @@ public class PipelinePolicy implements Policy {
             case "LRU":
                 block = new LruBlock(quota, quantumSize);
                 break;
+            case "LFU" :
+                block = new LfuBlock(quota, quantumSize, generalConfig);
+                break;
             case "LA-LRU":
                 block = new LALruBlock(blockConfig,
                                        new UneditableLatencyEstimatorProxy(latencyEstimator),
