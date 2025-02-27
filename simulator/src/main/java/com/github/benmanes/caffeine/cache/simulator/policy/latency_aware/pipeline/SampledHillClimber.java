@@ -20,7 +20,7 @@ import java.util.ArrayList;
 
 @Policy.PolicySpec(name = "latency-aware.SampledHillClimber")
 public class SampledHillClimber implements Policy {
-    private final static boolean DEBUG = true;
+    private final static boolean DUMP = true;
     @Nullable private PrintWriter quotaDump = null;
 
     private final PipelinePolicy mainPipeline;
@@ -50,7 +50,7 @@ public class SampledHillClimber implements Policy {
 
         createGhostCaches();
 
-        if (DEBUG) {
+        if (DUMP) {
             prepareQuotaDump();
         }
     }
@@ -165,7 +165,7 @@ public class SampledHillClimber implements Policy {
                                                        Arrays.toString(currState.quotas),
                                                        Arrays.toString(sampledState.quotas)));
 
-            if (DEBUG && quotaDump != null) {
+            if (DUMP && quotaDump != null) {
                 quotaDump.println(printFormatState(eventNum, currState.quotas, currentAvg));
                 quotaDump.flush();
             }
@@ -209,7 +209,7 @@ public class SampledHillClimber implements Policy {
 
     @Override
     public void dump() {
-        if (DEBUG && quotaDump != null) {
+        if (DUMP && quotaDump != null) {
             quotaDump.close();
         }
     }

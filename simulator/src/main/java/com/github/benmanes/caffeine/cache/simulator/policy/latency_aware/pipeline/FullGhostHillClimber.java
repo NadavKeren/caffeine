@@ -22,7 +22,7 @@ import java.util.List;
 @Policy.PolicySpec(name = "latency-aware.FGHC")
 public class FullGhostHillClimber implements Policy {
     private final static boolean DUMP_QUOTAS = true;
-    private final static boolean DEBUG = true;
+    private final static boolean DEBUG = false;
     @Nullable private PrintWriter quotaDump = null;
     @Nullable private PrintWriter logger = null;
 
