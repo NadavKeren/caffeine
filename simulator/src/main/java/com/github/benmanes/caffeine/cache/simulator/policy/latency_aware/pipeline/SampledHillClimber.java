@@ -17,6 +17,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Random;
+import java.util.function.LongSupplier;
 
 @Policy.PolicySpec(name = "latency-aware.SampledHillClimber")
 public class SampledHillClimber implements Policy {
@@ -24,16 +26,26 @@ public class SampledHillClimber implements Policy {
     @Nullable private PrintWriter quotaDump = null;
 
     private final PipelinePolicy mainPipeline;
-    private final LongSampler sampler;
+    private LongSampler sampler;
 
     private final PipelinePolicy sampledMainCache;
     private final List<Pair<PipelinePolicy, CacheDiff>> ghostCaches;
+    private LongSampler alternativeSampler;
+    private final PipelinePolicy alternativeSampledMain;
+    private final LongSupplier seedSupplier;
+    private final double samplingErrorTolerance;
+    private final int adaptionHoldDuration;
+    private int timeframesHoldingAdaption = 0;
+    private final int samplingTestDuration;
+    private int remainingIntervalsBeforeSamplingCheck;
+    private int numOfAltBetterSampling = 0;
 
     private final PolicyStats stats;
     private final int blockCount;
     private final int adaptionTimeframe;
     private int opsSinceAdaption = 0;
     private final int sampleOrder;
+    private final double samplingChangeThreshold;
 
     public SampledHillClimber(Config config) {
         var settings = new SampledHillClimberSettings(config);
@@ -45,6 +57,17 @@ public class SampledHillClimber implements Policy {
 
         sampler = new XXH3Sampler(sampleOrder, settings.randomSeed());
         sampledMainCache = new PipelinePolicy(config, sampleOrder);
+
+        alternativeSampledMain = new PipelinePolicy(config, sampleOrder);
+        Random seedRandom = new Random(settings.randomSeed());
+        seedSupplier = seedRandom::nextLong;
+        alternativeSampler = new XXH3Sampler(sampleOrder, seedSupplier.getAsLong());
+        samplingErrorTolerance = settings.getSamplingErrorTolerance();
+        adaptionHoldDuration = settings.getAdaptHoldDuration();
+        samplingTestDuration = settings.getSamplingTestDuration();
+        remainingIntervalsBeforeSamplingCheck = samplingTestDuration;
+        samplingChangeThreshold = settings.getSamplingChangeThreshold();
+
         final int numOfCaches = blockCount * (blockCount - 1);
         ghostCaches = new ArrayList<>(numOfCaches);
 
@@ -93,7 +116,6 @@ public class SampledHillClimber implements Policy {
                 ghost.makeDummy();
             }
         }
-
     }
 
     @Override
@@ -126,37 +148,112 @@ public class SampledHillClimber implements Policy {
             }
         }
 
+        if (alternativeSampler.shouldSample(event.key())) {
+            alternativeSampledMain.record(event);
+        }
+
         ++opsSinceAdaption;
 
         if (opsSinceAdaption >= adaptionTimeframe) {
+            if (this.timeframesHoldingAdaption == 0) {
+                adapt(event.eventNum());
+            } else {
+                --this.timeframesHoldingAdaption;
+            }
+
             opsSinceAdaption = 0;
-            adapt(event.eventNum());
+            resetTimeframeStats();
+        }
+    }
+
+    private void resetTimeframeStats() {
+        this.mainPipeline.resetTimeframeStats();
+        this.sampledMainCache.resetTimeframeStats();
+        this.alternativeSampledMain.resetTimeframeStats();
+        for (var pair : ghostCaches) {
+            var cache = pair.first();
+            cache.resetTimeframeStats();
         }
     }
 
     private void adapt(int eventNum) {
-        final double currentAvg = this.sampledMainCache.getTimeframeAveragePenalty();
+        final double currentAvg = this.mainPipeline.getTimeframeAveragePenalty();
+        int minIdx = getBestPerformingCacheIndex(currentAvg);
+
+        --this.remainingIntervalsBeforeSamplingCheck;
+        checkIfAlternativeSamplingBetter(currentAvg);
+
+        if (this.remainingIntervalsBeforeSamplingCheck == 0) {
+            changeSamplingIfNeeded();
+        }
+
+        if (minIdx >= 0) {
+            performQuantumShift(minIdx);
+        }
+
+        performDebugAssertionsAndDumps(eventNum, currentAvg);
+    }
+
+    private int getBestPerformingCacheIndex(double currentAvg) {
         double minAvg = currentAvg;
         int minIdx = -1;
 
         for (int idx = 0; idx < this.ghostCaches.size(); ++idx) {
-            double currGhostAvg = this.ghostCaches.get(idx).first().getTimeframeAveragePenalty();
+            var currentGhostCache = this.ghostCaches.get(idx).first();
+            double currGhostAvg = currentGhostCache.getTimeframeAveragePenalty();
             if (currGhostAvg < minAvg) {
                 minAvg = currGhostAvg;
                 minIdx = idx;
             }
         }
 
-        if (minIdx >= 0) {
-            CacheDiff adaption = this.ghostCaches.get(minIdx).right();
+        return minIdx;
+    }
 
-            Assert.assertCondition(this.mainPipeline.canExtend(adaption.incIdx) && this.mainPipeline.canShrink(adaption.decIdx),
-                                   () -> String.format("Illegal adaption performed: increasing %s, decreasing %s",
-                                                       this.mainPipeline.getType(adaption.incIdx),
-                                                       this.mainPipeline.getType(adaption.decIdx)));
+    private void checkIfAlternativeSamplingBetter(double currentAvg) {
+        final double sampledError = Math.abs(currentAvg - this.sampledMainCache.getTimeframeAveragePenalty());
+        final double altSampledError = Math.abs(currentAvg - this.alternativeSampledMain.getTimeframeAveragePenalty());
+        if (DUMP) {
+            System.out.printf("Sampled Error: %.2f  Alternate: %.2f%n", sampledError / currentAvg * 100, altSampledError / currentAvg * 100);
+        }
 
-            this.mainPipeline.moveQuantum(adaption.incIdx, adaption.decIdx);
-            this.sampledMainCache.moveQuantum(adaption.incIdx, adaption.decIdx);
+        if (sampledError / currentAvg > 0.05 && sampledError > altSampledError * samplingErrorTolerance) {
+            ++this.numOfAltBetterSampling;
+        }
+    }
+
+    private void changeSamplingIfNeeded() {
+        double altSamplingWinPercent = (double) this.numOfAltBetterSampling / this.samplingTestDuration;
+        if (altSamplingWinPercent >= this.samplingChangeThreshold) {
+            this.sampler = this.alternativeSampler;
+            if (DUMP) {
+                System.out.printf("Performing sample change, %.2f%n", altSamplingWinPercent * 100);
+            }
+            this.timeframesHoldingAdaption = this.adaptionHoldDuration;
+        }
+
+        this.alternativeSampler = new XXH3Sampler(sampleOrder, seedSupplier.getAsLong());
+        this.numOfAltBetterSampling = 0;
+        this.remainingIntervalsBeforeSamplingCheck = 0;
+    }
+
+    private void performQuantumShift(int minIdx) {
+        CacheDiff adaption = this.ghostCaches.get(minIdx).right();
+
+        Assert.assertCondition(this.mainPipeline.canExtend(adaption.incIdx) && this.mainPipeline.canShrink(adaption.decIdx),
+                               () -> String.format("Illegal adaption performed: increasing %s, decreasing %s",
+                                                   this.mainPipeline.getType(adaption.incIdx),
+                                                   this.mainPipeline.getType(adaption.decIdx)));
+
+        this.mainPipeline.moveQuantum(adaption.incIdx, adaption.decIdx);
+        this.sampledMainCache.moveQuantum(adaption.incIdx, adaption.decIdx);
+        this.alternativeSampledMain.moveQuantum(adaption.incIdx, adaption.decIdx);
+
+        copyGhostCaches();
+    }
+
+    private void performDebugAssertionsAndDumps(int eventNum, double currentAvg) {
+        if (DUMP && quotaDump != null) {
             var currState = this.mainPipeline.getCurrentState();
             var sampledState = this.sampledMainCache.getCurrentState();
 
@@ -165,12 +262,8 @@ public class SampledHillClimber implements Policy {
                                                        Arrays.toString(currState.quotas),
                                                        Arrays.toString(sampledState.quotas)));
 
-            if (DUMP && quotaDump != null) {
-                quotaDump.println(printFormatState(eventNum, currState.quotas, currentAvg));
-                quotaDump.flush();
-            }
-
-            copyGhostCaches();
+            quotaDump.println(printFormatState(eventNum, currState.quotas, currentAvg));
+            quotaDump.flush();
         }
     }
 
@@ -223,6 +316,20 @@ public class SampledHillClimber implements Policy {
         public int sampleOrderFactor() { return config().getInt(BASE_PATH + ".sample-order-factor"); }
 
         public int adaptionMultiplier() { return config().getInt(BASE_PATH + ".adaption-multiplier"); }
+
+        public double getSamplingErrorTolerance() {
+            return config().getDouble(BASE_PATH + ".sampling-error-tolerance");
+        }
+
+        public int getAdaptHoldDuration() {
+            return config().getInt(BASE_PATH + ".adaptation-hold-duration");
+        }
+
+        public int getSamplingTestDuration() { return config().getInt(BASE_PATH + ".sampling-test-duration"); }
+
+        public double getSamplingChangeThreshold() {
+            return config().getDouble(BASE_PATH + ".sampling-change-threshold");
+        }
     }
 
     private static class CacheDiff {
