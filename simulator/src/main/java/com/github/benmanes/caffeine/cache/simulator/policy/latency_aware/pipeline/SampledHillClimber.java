@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.function.Supplier;
 
 @Policy.PolicySpec(name = "latency-aware.SampledHillClimber")
 public class SampledHillClimber implements Policy {
@@ -29,7 +30,7 @@ public class SampledHillClimber implements Policy {
     private final PipelinePolicy sampledMainCache;
     private final List<Pair<PipelinePolicy, CacheDiff>> ghostCaches;
 
-    private final PolicyStats stats;
+    private final SampledHillClimberStats stats;
     private final int blockCount;
     private final int adaptionTimeframe;
     private int opsSinceAdaption = 0;
@@ -40,7 +41,7 @@ public class SampledHillClimber implements Policy {
         sampleOrder = settings.sampleOrderFactor();
         mainPipeline = new PipelinePolicy(config);
         blockCount = mainPipeline.blockCount();
-        stats = new PolicyStats("Sampled " + sampleOrder + " " + mainPipeline.generatePipelineName());
+        stats = new SampledHillClimberStats("Sampled " + sampleOrder + " " + mainPipeline.generatePipelineName());
         adaptionTimeframe = settings.adaptionMultiplier() * mainPipeline.cacheCapacity();
 
         sampler = new XXH3Sampler(sampleOrder, settings.randomSeed());
@@ -135,7 +136,11 @@ public class SampledHillClimber implements Policy {
     }
 
     private void adapt(int eventNum) {
-        final double currentAvg = this.sampledMainCache.getTimeframeAveragePenalty();
+        final double currentAvg = this.mainPipeline.getTimeframeAveragePenalty();
+        final double currentSampledAvg = this.sampledMainCache.getTimeframeAveragePenalty();
+        stats.recordSampledAveragePenalty(currentSampledAvg);
+        stats.recordSamplingError(currentAvg - currentSampledAvg);
+
         double minAvg = currentAvg;
         int minIdx = -1;
 
@@ -232,6 +237,30 @@ public class SampledHillClimber implements Policy {
         public CacheDiff(int inc, int dec) {
             this.incIdx = inc;
             this.decIdx = dec;
+        }
+    }
+
+    private static class SampledHillClimberStats extends PolicyStats {
+        private double sampledPenalty = 0d;
+        private double squaredError = 0d;
+        private int penaltyCount = 0;
+
+        SampledHillClimberStats(String format, Object... args) {
+            super(format, args);
+            addMetric(Metric.of("Sampled Average Penalty", (Supplier<Double>) this::sampledAveragePenalty, Metric.MetricType.NUMBER, true));
+            addMetric(Metric.of("Sampled Average Penalty (MSE)", (Supplier<Double>) this::meanSquareError, Metric.MetricType.NUMBER, true));
+        }
+
+        public double sampledAveragePenalty() { return sampledPenalty / penaltyCount; }
+        public double meanSquareError() { return squaredError / penaltyCount; }
+
+        public void recordSampledAveragePenalty(double sampledAveragePenalty) {
+            this.sampledPenalty += sampledAveragePenalty;
+            penaltyCount++;
+        }
+
+        public void recordSamplingError(double samplingError) {
+            this.squaredError += samplingError * samplingError;
         }
     }
 }
