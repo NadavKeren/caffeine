@@ -7,6 +7,8 @@ import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.typesafe.config.Config;
 import it.unimi.dsi.fastutil.Pair;
+import it.unimi.dsi.fastutil.doubles.DoubleArrayList;
+import it.unimi.dsi.fastutil.doubles.DoubleList;
 import it.unimi.dsi.fastutil.objects.ObjectObjectImmutablePair;
 
 import javax.annotation.Nullable;
@@ -15,6 +17,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.function.Supplier;
@@ -242,25 +245,56 @@ public class SampledHillClimber implements Policy {
 
     private static class SampledHillClimberStats extends PolicyStats {
         private double sampledPenalty = 0d;
-        private double squaredError = 0d;
         private int penaltyCount = 0;
+        private DoubleList squaredErrors = new DoubleArrayList();
 
         SampledHillClimberStats(String format, Object... args) {
             super(format, args);
             addMetric(Metric.of("Sampled Average Penalty", (Supplier<Double>) this::sampledAveragePenalty, Metric.MetricType.NUMBER, true));
             addMetric(Metric.of("Sampled Average Penalty (MSE)", (Supplier<Double>) this::meanSquareError, Metric.MetricType.NUMBER, true));
+            addMetric(Metric.of("Sampled Average Penalty (Max Squared Error)", (Supplier<Double>) this::maxSquaredError, Metric.MetricType.NUMBER, true));
+            addMetric(Metric.of("Sampled Average Penalty (p90 Squared Error)", (Supplier<Double>) this::p90SquaredError, Metric.MetricType.NUMBER, true));
+            addMetric(Metric.of("Sampled Average Penalty (p10 Squared Error)", (Supplier<Double>) this::p10SquaredError, Metric.MetricType.NUMBER, true));
         }
 
         public double sampledAveragePenalty() { return sampledPenalty / penaltyCount; }
-        public double meanSquareError() { return squaredError / penaltyCount; }
+        public double meanSquareError() {
+            return squaredErrors.stream()
+                                .mapToDouble(Double::doubleValue)
+                                .average()
+                                .orElseThrow(() -> new IllegalArgumentException("Error calculating the average"));
+        }
 
         public void recordSampledAveragePenalty(double sampledAveragePenalty) {
             this.sampledPenalty += sampledAveragePenalty;
             penaltyCount++;
         }
 
+        public double maxSquaredError() {
+            return squaredErrors.stream()
+                                .mapToDouble(Double::doubleValue)
+                                .max()
+                                .orElseThrow(() -> new IllegalArgumentException("Error calculating the maximum"));
+        }
+
+        private double getSquareErrorPercentile(int percentile) {
+            Collections.sort(this.squaredErrors);
+
+            int percentileIndex = percentile * squaredErrors.size() / 100;
+
+            return squaredErrors.getDouble(percentileIndex);
+        }
+
+        public double p90SquaredError() {
+            return getSquareErrorPercentile(90);
+        }
+
+        public double p10SquaredError() {
+            return getSquareErrorPercentile(10);
+        }
+
         public void recordSamplingError(double samplingError) {
-            this.squaredError += samplingError * samplingError;
+            this.squaredErrors.add(samplingError * samplingError);
         }
     }
 }
