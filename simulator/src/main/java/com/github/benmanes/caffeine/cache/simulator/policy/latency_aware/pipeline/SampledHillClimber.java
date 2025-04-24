@@ -135,7 +135,7 @@ public class SampledHillClimber implements Policy {
     }
 
     private void adapt(int eventNum) {
-        final double currentAvg = this.sampledMainCache.getTimeframeAveragePenalty();
+        final double currentAvg = this.mainPipeline.getTimeframeAveragePenalty();
         double minAvg = currentAvg;
         int minIdx = -1;
 
@@ -172,6 +172,8 @@ public class SampledHillClimber implements Policy {
 
             copyGhostCaches();
         }
+
+        this.mainPipeline.resetTimeframeStats();
     }
 
     private String printFormatState(int eventNum, int[] quotas, double avgPen) {
