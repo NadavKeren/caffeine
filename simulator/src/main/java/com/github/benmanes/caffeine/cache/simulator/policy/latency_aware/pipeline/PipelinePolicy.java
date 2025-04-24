@@ -46,6 +46,8 @@ public class PipelinePolicy implements Policy {
     final private int blockCount;
     final private int quantumSize;
     final private int cacheCapacity;
+    private int opsSinceLastAging = 0;
+    final private int agingWindowSize;
 
     private boolean isDummy;
     final private boolean isCopy;
@@ -75,6 +77,7 @@ public class PipelinePolicy implements Policy {
         this.cacheCapacity = 0;
         this.latencyEstimator = null;
         this.burstEstimator = null;
+        this.agingWindowSize = 0;
         this.isDummy = true;
         this.isCopy = true;
         this.timeframeStats = new TimeframeStats();
@@ -106,6 +109,8 @@ public class PipelinePolicy implements Policy {
 
         latencyEstimator = new LatestLatencyEstimator();
         burstEstimator = createBurstEstimator(settings);
+
+        this.agingWindowSize = settings.agingWindowSize();
 
         final var blockConfigs = settings.blocksConfigs();
 
@@ -147,8 +152,7 @@ public class PipelinePolicy implements Policy {
 
         switch (type) {
             case "normal":
-                burstEstimator = new MovingAverageBurstEstimator(settings.agingWindowSize(),
-                                                                 settings.ageSmoothFactor(),
+                burstEstimator = new MovingAverageBurstEstimator(settings.ageSmoothFactor(),
                                                                  settings.numOfPartitions(),
                                                                  this.cacheCapacity);
                 break;
@@ -296,6 +300,8 @@ public class PipelinePolicy implements Policy {
 
         this.latencyEstimator = source.latencyEstimator.createDeepCopy();
         this.burstEstimator = source.burstEstimator.createDeepCopy();
+        this.agingWindowSize = source.agingWindowSize;
+        this.opsSinceLastAging = source.opsSinceLastAging;
 
         for (int i = 0; i < blockCount; ++i) {
             blocks[i] = source.blocks[i].createCopy();
@@ -361,6 +367,12 @@ public class PipelinePolicy implements Policy {
             }
         }
 
+        ++opsSinceLastAging;
+        if (opsSinceLastAging >= agingWindowSize) {
+            latencyEstimator.ageAll();
+            burstEstimator.ageAll();
+            opsSinceLastAging = 0;
+        }
     }
 
     @Override

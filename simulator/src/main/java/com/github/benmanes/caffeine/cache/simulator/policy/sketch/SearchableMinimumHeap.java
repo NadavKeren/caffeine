@@ -64,11 +64,15 @@ public class SearchableMinimumHeap<V> {
         int numItemsToMove = Math.min(maximalCapacity, this.size);
         for (int i = 0; i < numItemsToMove; ++i) {
             long key = this.heap[i];
-            V value = this.get(key);
+            V value = this.valuesMap.get(key);
 
             other.heap[i] = key;
             other.valuesMap.put(key, value);
             other.idxMap.put(key, i);
+
+            int finalI = i;
+            Assert.assertCondition(other.idxMap.size() == i + 1, () -> String.format("%d item wasn't inserted", finalI));
+            Assert.assertCondition(other.valuesMap.size() == i + 1, () -> String.format("%d item wasn't inserted", finalI));
         }
 
         other.size = this.size;
@@ -133,9 +137,13 @@ public class SearchableMinimumHeap<V> {
     public void insert(long k, V v) {
         Assert.assertCondition(this.size <= this.heap.length, "Insertion into full heap");
         Assert.assertCondition(!this.idxMap.containsKey(k), "Inserting duplicate item");
+        Assert.assertCondition(!this.valuesMap.containsKey(k), "Inserting duplicate item");
         this.heap[this.size++] = k;
         this.valuesMap.put(k, v);
         upHeap(this.size - 1);
+
+        Assert.assertCondition(this.idxMap.size() == this.valuesMap.size(), "size mismatch");
+        Assert.assertCondition(this.idxMap.size() == this.size, "size mismatch");
     }
 
     public V remove(long k) {
@@ -196,7 +204,13 @@ public class SearchableMinimumHeap<V> {
     }
 
     public @Nullable V get(long key) {
-        return this.valuesMap.get(key);
+        V returnValue = this.valuesMap.get(key);
+
+        if (returnValue != null) {
+            moveOnceDownHeap(this.idxMap.get(key));
+        }
+
+        return returnValue;
     }
 
     public int getIndex(long key) {
@@ -250,6 +264,31 @@ public class SearchableMinimumHeap<V> {
         heap[i] = targetItem;
 
         return i;
+    }
+
+    public void moveOnceDownHeap(int i) {
+        final int originIdx = i;
+        Assert.assertCondition(i < size && i >= 0, () -> String.format("Invalid index: %d in size %d", originIdx, size));
+
+        if (i > (size >> 1)) {
+            return;
+        }
+
+        long targetItem = heap[i];
+        int leftChildIdx = (i << 1) + 1;
+        int rightChildIdx = leftChildIdx + 1;
+
+        int minimalChildIdx = rightChildIdx < this.size && c.compare(heap[leftChildIdx], heap[rightChildIdx]) < 0
+                            ? leftChildIdx
+                            : rightChildIdx;
+        long minimalChild = heap[minimalChildIdx];
+
+        if (c.compare(targetItem, minimalChild) < 0) {
+            heap[i] = minimalChild;
+            heap[minimalChildIdx] = targetItem;
+            this.idxMap.put(targetItem, minimalChildIdx);
+            this.idxMap.put(minimalChild, i);
+        }
     }
 
     public int upHeap(int i) {

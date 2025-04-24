@@ -20,30 +20,29 @@ final public class BurstBlock {
     private SearchableMinimumHeap<EntryData> heap;
     private int currentCapacity;
     final private int maximalCapacity;
-    private int fetchCounter;
     final private LongComparator c;
+    final private LatencyEstimator estimator;
+    private int lastSeenVersion = 0;
 
     public BurstBlock(int maximalCapacity, int currentCapacity, LatencyEstimator estimator) {
         this.c = (l1, l2) -> (int) Math.round(estimator.getLatencyEstimation(l1) - estimator.getLatencyEstimation(l2));
+        this.estimator = estimator;
         this.heap = new SearchableMinimumHeap<>(maximalCapacity, this.c);
         this.currentCapacity = currentCapacity;
         this.maximalCapacity = maximalCapacity;
-        this.fetchCounter = 0;
     }
 
     public BurstBlock(BurstBlock other, String name) {
         this.c = other.c;
         this.heap = new SearchableMinimumHeap<>(other.heap);
+        this.estimator = other.estimator;
         this.currentCapacity = other.currentCapacity;
         this.maximalCapacity = other.maximalCapacity;
-        this.fetchCounter = 0;
     }
-
 
     public void copyInto(BurstBlock other) {
         this.heap.copyInto(other.heap);
         other.currentCapacity = this.currentCapacity;
-        other.fetchCounter = this.fetchCounter;
     }
 
     public void clear() {
@@ -104,21 +103,17 @@ final public class BurstBlock {
 
     private void update() {
         heap.makeHeap();
-        fetchCounter = 0;
     }
 
     public @Nullable EntryData get(long key) {
-        ++fetchCounter;
         return heap.get(key);
     }
 
-    public int getIndex(long key) {
-        return this.heap.getIndex(key);
-    }
-
     public EntryData getVictim() {
-        if (fetchCounter > 10 * currentCapacity) {
+        int currentEstimationVersion = estimator.getEstimationVersion();
+        if (lastSeenVersion < currentEstimationVersion) {
             update();
+            lastSeenVersion = currentEstimationVersion;
         }
 
         return heap.min().second();

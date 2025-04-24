@@ -30,4 +30,7 @@ public interface LatencyEstimator {
     default int size() { throw new UnsupportedOperationException(); }
 
     default LatencyEstimator createDeepCopy() { throw new UnsupportedOperationException("No copy defined"); }
+
+    default void ageAll() {}
+    default int getEstimationVersion() { return 0; }
 }

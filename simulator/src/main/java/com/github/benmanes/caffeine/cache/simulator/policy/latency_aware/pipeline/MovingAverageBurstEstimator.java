@@ -8,26 +8,23 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 public class MovingAverageBurstEstimator implements LatencyEstimator {
     final private static float LOAD_FACTOR = 0.875f;
     final protected Long2ObjectOpenHashMap<Entry> storedValues;
-    final protected long agingWindowSize;
     final protected double ageSmoothingFactor;
     final protected int numOfPartitions;
     final protected int maxSize;
+    protected int version = 0;
 
     private double hitPenalty;
 
-    public MovingAverageBurstEstimator(long agingWindowSize,
-                                       double ageSmoothingFactor,
+    public MovingAverageBurstEstimator(double ageSmoothingFactor,
                                        int numOfPartitions,
                                        int maxSize) {
         this.storedValues = new Long2ObjectOpenHashMap<>(maxSize, LOAD_FACTOR);
-        this.agingWindowSize = agingWindowSize;
         this.ageSmoothingFactor = ageSmoothingFactor;
         this.numOfPartitions = numOfPartitions;
         this.maxSize = maxSize;
     }
 
     private MovingAverageBurstEstimator(MovingAverageBurstEstimator source) {
-        this.agingWindowSize = source.agingWindowSize;
         this.ageSmoothingFactor = source.ageSmoothingFactor;
         this.numOfPartitions = source.numOfPartitions;
         this.maxSize = source.maxSize;
@@ -47,10 +44,15 @@ public class MovingAverageBurstEstimator implements LatencyEstimator {
     }
 
     @Override
+    public void ageAll() {
+        ++this.version;
+    }
+
+    @Override
     public void record(long key, double value, double recordTime) {
         Assert.assertCondition(!storedValues.containsKey(key), () -> String.format("Found the key inside the estimator %d", key));
         Entry newEntry = new Entry(value);
-        newEntry.recordArrival((long) recordTime);
+        newEntry.recordArrival((long) recordTime, version);
 
         storedValues.put(key, newEntry);
     }
@@ -60,7 +62,7 @@ public class MovingAverageBurstEstimator implements LatencyEstimator {
         Entry entry = storedValues.get(key);
         Assert.assertCondition(entry != null, () -> String.format("Trying to update a non-existing item: %d", key));
 
-        entry.recordArrival((long) recordTime);
+        entry.recordArrival((long) recordTime, version);
     }
 
     @Override
@@ -72,14 +74,14 @@ public class MovingAverageBurstEstimator implements LatencyEstimator {
     public double getLatencyEstimation(long key) {
         Entry entry = storedValues.get(key);
 
-        return entry != null ? entry.getValue() : 0;
+        return entry != null ? entry.getValue(version) : 0;
     }
 
     @Override
     public double getLatencyEstimation(long key, double time) {
         Entry entry = storedValues.get(key);
 
-        return entry != null ? entry.getValue((long) time) : 0;
+        return entry != null ? entry.getValue(version) : 0;
     }
 
     @Override
@@ -107,15 +109,14 @@ public class MovingAverageBurstEstimator implements LatencyEstimator {
 
         final private double latency;
         private long lastUpdateTime = 0;
-        final private double agingWindowDuration;
         final private long partitionLength;
+        private int lastAccessVersion = 0;
         private double value = 0d;
 
         public Entry(double latency) {
             virtualFetchTimestamps = new long[numOfPartitions];
             accumulators = new double[numOfPartitions];
             this.latency = latency;
-            agingWindowDuration = latency * agingWindowSize;
             partitionLength = (long) latency / numOfPartitions;
         }
 
@@ -128,17 +129,16 @@ public class MovingAverageBurstEstimator implements LatencyEstimator {
 
             this.latency = source.latency;
             this.lastUpdateTime = source.lastUpdateTime;
-            this.agingWindowDuration = source.agingWindowDuration;
             this.partitionLength = source.partitionLength;
             this.value = source.value;
         }
 
-        private void ageValueIfNeeded(long timestamp) {
-            int numOfAgingDecays = (int) ((timestamp - lastUpdateTime) / agingWindowDuration);
+        private void ageValueIfNeeded(int currentVersion) {
+            int numOfAgingDecays = currentVersion - lastAccessVersion;
+            lastAccessVersion = currentVersion;
 
             if (numOfAgingDecays > 0) {
                 value *= Math.pow(1 - ageSmoothingFactor, numOfAgingDecays);
-                lastUpdateTime = timestamp;
             }
         }
 
@@ -151,8 +151,8 @@ public class MovingAverageBurstEstimator implements LatencyEstimator {
             size = size - numOfIdxToShift;
         }
 
-        public void recordArrival(long timestamp) {
-            ageValueIfNeeded(timestamp);
+        public void recordArrival(long timestamp, int version) {
+            ageValueIfNeeded(version);
 
             int numOfIdxToShift = 0;
             for (int idx = 0; idx < size; ++idx) {
@@ -198,15 +198,10 @@ public class MovingAverageBurstEstimator implements LatencyEstimator {
             }
         }
 
-        public double getValue(long timestamp) {
-            Assert.assertCondition(timestamp >= lastUpdateTime, "Past timestamp given");
-            ageValueIfNeeded(timestamp);
+        public double getValue(int version) {
+            ageValueIfNeeded(version);
 
             return value;
-        }
-
-        public double getValue() {
-            return getValue(lastUpdateTime);
         }
     }
 }
