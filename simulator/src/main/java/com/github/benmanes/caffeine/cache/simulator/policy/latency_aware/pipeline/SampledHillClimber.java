@@ -34,6 +34,8 @@ public class SampledHillClimber implements Policy {
     private final int adaptionTimeframe;
     private int opsSinceAdaption = 0;
     private final int sampleOrder;
+    private int adaptionsSinceLastSamplingCheck = 0;
+    private final int samplingChoiceTimeframe;
 
     public SampledHillClimber(Config config) {
         var settings = new SampledHillClimberSettings(config);
@@ -44,6 +46,7 @@ public class SampledHillClimber implements Policy {
         adaptionTimeframe = settings.adaptionMultiplier() * mainPipeline.cacheCapacity();
 
         sampler = new XXH3Sampler(sampleOrder, settings.randomSeed());
+        samplingChoiceTimeframe = settings.samplingChoiceTimeframe();
         sampledMainCache = new PipelinePolicy(config, sampleOrder);
         final int numOfCaches = blockCount * (blockCount - 1);
         ghostCaches = new ArrayList<>(numOfCaches);
@@ -135,6 +138,8 @@ public class SampledHillClimber implements Policy {
     }
 
     private void adapt(int eventNum) {
+        ++adaptionsSinceLastSamplingCheck;
+
         final double currentAvg = this.mainPipeline.getTimeframeAveragePenalty();
         double minAvg = currentAvg;
         int minIdx = -1;
@@ -174,6 +179,39 @@ public class SampledHillClimber implements Policy {
         }
 
         this.mainPipeline.resetTimeframeStats();
+    }
+
+    private void changeSamplingIfNeeded() {
+        if (adaptionsSinceLastSamplingCheck >= samplingChoiceTimeframe) {
+            adaptionsSinceLastSamplingCheck = 0;
+            int[] samplingDist = sampler.sampleDist();
+            int currExpected = sampler.getCurrentExpectedResult();
+
+            int totalReqs = 0;
+            for (int req : samplingDist) {
+                totalReqs += req;
+            }
+
+            double currentSamplingRate = (double) samplingDist[currExpected] / totalReqs;
+            if (currentSamplingRate < 1d / (1 << sampleOrder)) {
+                int maxSampledResult = -1;
+                double maxSampledRate = -1d;
+                for (int idx = 0; idx < samplingDist.length; ++idx) {
+                    double idxSampledRate = (double) samplingDist[idx] / totalReqs;
+                    if (idxSampledRate > maxSampledRate) {
+                        maxSampledResult = idx;
+                        maxSampledRate = idxSampledRate;
+                    }
+                }
+
+                Assert.assertCondition(maxSampledResult >= 0, "Invalid result");
+                final double finalMaxSampledRate = maxSampledRate;
+                Assert.assertCondition(maxSampledResult > currentSamplingRate, () -> String.format("Expected a better sampling rate, curr: %.2f new: %.2f", currentSamplingRate * 100, finalMaxSampledRate * 100));
+
+                sampler.changeSample(maxSampledResult);
+                sampler.resetSampleDist();
+            }
+        }
     }
 
     private String printFormatState(int eventNum, int[] quotas, double avgPen) {
@@ -225,6 +263,8 @@ public class SampledHillClimber implements Policy {
         public int sampleOrderFactor() { return config().getInt(BASE_PATH + ".sample-order-factor"); }
 
         public int adaptionMultiplier() { return config().getInt(BASE_PATH + ".adaption-multiplier"); }
+
+        public int samplingChoiceTimeframe() { return config().getInt(BASE_PATH + ".sampling-choice-timeframe"); }
     }
 
     private static class CacheDiff {
