@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.function.DoubleSupplier;
 
 @Policy.PolicySpec(name = "latency-aware.SampledHillClimber")
 public class SampledHillClimber implements Policy {
@@ -29,7 +30,7 @@ public class SampledHillClimber implements Policy {
     private final PipelinePolicy sampledMainCache;
     private final List<Pair<PipelinePolicy, CacheDiff>> ghostCaches;
 
-    private final PolicyStats stats;
+    private final SHCStats stats;
     private final int blockCount;
     private final int adaptionTimeframe;
     private int opsSinceAdaption = 0;
@@ -40,7 +41,7 @@ public class SampledHillClimber implements Policy {
         sampleOrder = settings.sampleOrderFactor();
         mainPipeline = new PipelinePolicy(config);
         blockCount = mainPipeline.blockCount();
-        stats = new PolicyStats("Sampled " + sampleOrder + " " + mainPipeline.generatePipelineName());
+        stats = new SHCStats("Sampled " + sampleOrder + " " + mainPipeline.generatePipelineName());
         adaptionTimeframe = settings.adaptionMultiplier() * mainPipeline.cacheCapacity();
 
         sampler = new XXH3Sampler(sampleOrder, settings.randomSeed());
@@ -116,7 +117,9 @@ public class SampledHillClimber implements Policy {
                 throw new IllegalStateException("No such event status");
         }
 
+        stats.recordRequest();
         if (sampler.shouldSample(event.key())) {
+            stats.recordSampledRequest();
             sampledMainCache.record(event);
             for (var pair : ghostCaches) {
                 var cache = pair.first();
@@ -225,6 +228,27 @@ public class SampledHillClimber implements Policy {
         public int sampleOrderFactor() { return config().getInt(BASE_PATH + ".sample-order-factor"); }
 
         public int adaptionMultiplier() { return config().getInt(BASE_PATH + ".adaption-multiplier"); }
+    }
+
+    public static class SHCStats extends PolicyStats {
+        private long requests = 0;
+        private long sampledRequests = 0;
+        public SHCStats(String format, Object... args) {
+            super(format, args);
+            addMetric(Metric.of("Sampling Percentage", (DoubleSupplier) this::samplingPercentage, Metric.MetricType.PERCENT, true));
+        }
+
+        public void recordRequest() {
+            ++requests;
+        }
+
+        public void recordSampledRequest() {
+            ++sampledRequests;
+        }
+
+        public double samplingPercentage() {
+            return requests > 0 ? (double) sampledRequests / requests : 1d;
+        }
     }
 
     private static class CacheDiff {
