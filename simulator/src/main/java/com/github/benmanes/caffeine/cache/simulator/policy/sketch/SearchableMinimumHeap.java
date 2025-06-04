@@ -278,6 +278,10 @@ public class SearchableMinimumHeap<V> {
         int leftChildIdx = (i << 1) + 1;
         int rightChildIdx = leftChildIdx + 1;
 
+        if (leftChildIdx >= size) {
+            return;
+        }
+
         int minimalChildIdx = rightChildIdx < this.size && c.compare(heap[leftChildIdx], heap[rightChildIdx]) < 0
                             ? leftChildIdx
                             : rightChildIdx;
