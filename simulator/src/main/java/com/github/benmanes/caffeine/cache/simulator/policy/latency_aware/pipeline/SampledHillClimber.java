@@ -53,6 +53,7 @@ public class SampledHillClimber implements Policy {
 
         if (DUMP) {
             prepareQuotaDump();
+            quotaDump.println(printFormatState(0, this.mainPipeline.getCurrentState().quotas, 0, new double[ghostCaches.size()]));
         }
     }
 
@@ -79,24 +80,6 @@ public class SampledHillClimber implements Policy {
         }
     }
 
-    private void copyGhostCaches() {
-        for (var pair : ghostCaches) {
-            PipelinePolicy ghost = pair.first();
-            CacheDiff diff = pair.second();
-
-            ghost.clear();
-
-            sampledMainCache.copyInto(ghost);
-
-            if (ghost.canExtend(diff.incIdx) && ghost.canShrink(diff.decIdx)) {
-                ghost.moveQuantum(diff.incIdx, diff.decIdx);
-            } else {
-                ghost.makeDummy();
-            }
-        }
-
-    }
-
     @Override
     public void record(AccessEvent event) {
         this.mainPipeline.record(event);
@@ -117,7 +100,6 @@ public class SampledHillClimber implements Policy {
                 throw new IllegalStateException("No such event status");
         }
 
-        stats.recordRequest();
         if (sampler.shouldSample(event.key())) {
             stats.recordSampledRequest();
             sampledMainCache.record(event);
@@ -139,15 +121,22 @@ public class SampledHillClimber implements Policy {
 
     private void adapt(int eventNum) {
         final double currentAvg = this.mainPipeline.getTimeframeAveragePenalty();
+
+        this.mainPipeline.resetTimeframeStats();
+
         double minAvg = currentAvg;
         int minIdx = -1;
 
+        double[] timeframeResults = new double[this.ghostCaches.size()];
         for (int idx = 0; idx < this.ghostCaches.size(); ++idx) {
-            double currGhostAvg = this.ghostCaches.get(idx).first().getTimeframeAveragePenalty();
+            var currGhostCache = this.ghostCaches.get(idx).first();
+            double currGhostAvg = currGhostCache.getTimeframeAveragePenalty();
             if (currGhostAvg < minAvg) {
                 minAvg = currGhostAvg;
                 minIdx = idx;
             }
+            timeframeResults[idx] = currGhostAvg < Double.MAX_VALUE ? currGhostAvg : -1;
+            currGhostCache.resetTimeframeStats();
         }
 
         if (minIdx >= 0) {
@@ -160,26 +149,26 @@ public class SampledHillClimber implements Policy {
 
             this.mainPipeline.moveQuantum(adaption.incIdx, adaption.decIdx);
             this.sampledMainCache.moveQuantum(adaption.incIdx, adaption.decIdx);
-            var currState = this.mainPipeline.getCurrentState();
-            var sampledState = this.sampledMainCache.getCurrentState();
+            final var currState = this.mainPipeline.getCurrentState();
+            final var sampledState = this.sampledMainCache.getCurrentState();
 
             Assert.assertCondition(Arrays.equals(currState.quotas, sampledState.quotas),
                                    () -> String.format("The sampled and Main configuration mismatch: main: %s sampled: %s",
                                                        Arrays.toString(currState.quotas),
                                                        Arrays.toString(sampledState.quotas)));
 
-            if (DUMP && quotaDump != null) {
-                quotaDump.println(printFormatState(eventNum, currState.quotas, currentAvg));
-                quotaDump.flush();
-            }
 
-            copyGhostCaches();
+            createGhostCaches();
         }
 
-        this.mainPipeline.resetTimeframeStats();
+        if (DUMP && quotaDump != null) {
+            quotaDump.println(printFormatState(eventNum, this.mainPipeline.getCurrentState().quotas, currentAvg, timeframeResults));
+            quotaDump.flush();
+        }
+
     }
 
-    private String printFormatState(int eventNum, int[] quotas, double avgPen) {
+    private String printFormatState(int eventNum, int[] quotas, double avgPen, double[] ghostResults) {
         StringBuilder sb = new StringBuilder();
 
         sb.append(eventNum);
@@ -191,6 +180,14 @@ public class SampledHillClimber implements Policy {
         }
 
         sb.append(String.format("%.2f", avgPen));
+        for (double res : ghostResults) {
+            sb.append(',');
+            if (res >= 0) {
+                sb.append(String.format("%.2f", res));
+            } else {
+                sb.append("NA");
+            }
+        }
 
         return sb.toString();
     }
@@ -231,15 +228,10 @@ public class SampledHillClimber implements Policy {
     }
 
     public static class SHCStats extends PolicyStats {
-        private long requests = 0;
         private long sampledRequests = 0;
         public SHCStats(String format, Object... args) {
             super(format, args);
             addMetric(Metric.of("Sampling Percentage", (DoubleSupplier) this::samplingPercentage, Metric.MetricType.PERCENT, true));
-        }
-
-        public void recordRequest() {
-            ++requests;
         }
 
         public void recordSampledRequest() {
@@ -247,7 +239,7 @@ public class SampledHillClimber implements Policy {
         }
 
         public double samplingPercentage() {
-            return requests > 0 ? (double) sampledRequests / requests : 1d;
+            return this.operationCount() > 0 ? (double) sampledRequests / this.operationCount() : 1d;
         }
     }
 
