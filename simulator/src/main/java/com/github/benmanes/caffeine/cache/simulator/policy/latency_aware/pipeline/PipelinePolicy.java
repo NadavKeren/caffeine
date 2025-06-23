@@ -96,6 +96,13 @@ public class PipelinePolicy implements Policy {
         var settings = new PipelineSettings(config);
 
         totalQuanta = settings.numOfQuanta();
+        BasicSettings basicSettings = new BasicSettings(config);
+
+        Assert.assertCondition(settings.quantumSize() == basicSettings.maximumSize() / totalQuanta,
+                               () -> String.format("Quantum Size: %d and max size: %d mismatch",
+                                                   settings.quantumSize(),
+                                                   basicSettings.maximumSize()));
+
         quantumSize = settings.quantumSize() >> shrinkOrder;
         Assert.assertCondition(quantumSize > 0, () -> String.format("The sampling order is too high: %d", shrinkOrder));
         cacheCapacity = totalQuanta * quantumSize;
