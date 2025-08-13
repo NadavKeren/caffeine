@@ -41,7 +41,7 @@ public class SampledHillClimber implements Policy {
         sampleOrder = settings.sampleOrderFactor();
         mainPipeline = new PipelinePolicy(config);
         blockCount = mainPipeline.blockCount();
-        stats = new SHCStats("Sampled " + sampleOrder + " " + mainPipeline.generatePipelineName());
+        stats = new SHCStats("Sampled " + sampleOrder + " " + mainPipeline.generatePipelineName(), sampleOrder);
         adaptionTimeframe = settings.adaptionMultiplier() * mainPipeline.cacheCapacity();
 
         sampler = new XXH3Sampler(sampleOrder, settings.randomSeed());
@@ -229,9 +229,10 @@ public class SampledHillClimber implements Policy {
 
     public static class SHCStats extends PolicyStats {
         private long sampledRequests = 0;
-        public SHCStats(String format, Object... args) {
+        public SHCStats(String format, int sampleOrder, Object... args) {
             super(format, args);
             addMetric(Metric.of("Sampling Percentage", (DoubleSupplier) this::samplingPercentage, Metric.MetricType.PERCENT, true));
+            addMetric(Metric.of("Sample Order", sampleOrder, Metric.MetricType.NUMBER, true));
         }
 
         public void recordSampledRequest() {
@@ -239,7 +240,7 @@ public class SampledHillClimber implements Policy {
         }
 
         public double samplingPercentage() {
-            return this.operationCount() > 0 ? (double) sampledRequests / this.operationCount() : 1d;
+            return this.requestCount() > 0 ? (double) sampledRequests / this.requestCount() : 1d;
         }
     }
 
