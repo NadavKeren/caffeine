@@ -52,11 +52,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipelin
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.SampleErrorTestPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.SampledHillClimber;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.RandomHillClimber;
-import com.github.benmanes.caffeine.cache.simulator.policy.linked.FrequentlyUsedPolicy;
-import com.github.benmanes.caffeine.cache.simulator.policy.linked.LinkedPolicy;
-import com.github.benmanes.caffeine.cache.simulator.policy.linked.MultiQueuePolicy;
-import com.github.benmanes.caffeine.cache.simulator.policy.linked.S4LruPolicy;
-import com.github.benmanes.caffeine.cache.simulator.policy.linked.SegmentedLruPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.linked.*;
 import com.github.benmanes.caffeine.cache.simulator.policy.opt.ClairvoyantPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.opt.UnboundedPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.product.Cache2kPolicy;
@@ -86,6 +82,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.tinycache.Tiny
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.tinycache.WindowTinyCachePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowCAPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.AdaptiveCAPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.two_queue.S3FifoPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.two_queue.TuQueuePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.two_queue.TwoQueuePolicy;
 import com.google.auto.value.AutoValue;
@@ -185,6 +182,7 @@ public final class Registry {
     registerMany(S4LruPolicy.class, S4LruPolicy::policies);
     register(MultiQueuePolicy.class, MultiQueuePolicy::new);
     registerMany(SegmentedLruPolicy.class, SegmentedLruPolicy::policies);
+    register(SievePolicy.class, SievePolicy::new);
   }
 
   private void registerSampled() {
@@ -198,6 +196,7 @@ public final class Registry {
   private void registerTwoQueue() {
     register(TuQueuePolicy.class, TuQueuePolicy::new);
     register(TwoQueuePolicy.class, TwoQueuePolicy::new);
+    register(S3FifoPolicy.class, S3FifoPolicy::new);
   }
 
   private void registerSketch() {
