@@ -62,7 +62,7 @@ public final class GDWheelPolicy implements Policy {
     this.cost = new double[settings.numberOfWheels()];
     this.clockHand = new int[settings.numberOfWheels()];
     this.wheel = new Sentinel[settings.numberOfWheels()][settings.numberOfQueues()];
-    this.fetchStage = new FetchStage((int) maximumSize * 10);
+    this.fetchStage = new FetchStage((int) Math.min(maximumSize * 10, Integer.MAX_VALUE >> 10));
 
     for (int i = 0; i < settings.numberOfWheels(); i++) {
       for (int j = 0; j < settings.numberOfQueues(); j++) {
