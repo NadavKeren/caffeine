@@ -52,6 +52,7 @@ public class PolicyStats {
   private long delayedHitCount;
   private long missCount;
   private long hitsWeight;
+  private long delayedHitWeight;
   private long missesWeight;
   private double hitPenalty;
   private double delayedHitPenalty;
@@ -162,6 +163,11 @@ public class PolicyStats {
     recordHit();
   }
 
+  public void recordWeightedDelayedHit(int weight) {
+    delayedHitWeight += weight;
+    recordDelayedHit();
+  }
+
   public long hitsWeight() {
     return hitsWeight;
   }
@@ -229,7 +235,7 @@ public class PolicyStats {
   }
 
   public long requestsWeight() {
-    return hitsWeight + missesWeight;
+    return hitsWeight + missesWeight + delayedHitWeight;
   }
 
   public long admissionCount() {
@@ -283,6 +289,11 @@ public class PolicyStats {
   public double weightedMissRate() {
     long requestsWeight = requestsWeight();
     return (requestsWeight == 0) ? 1.0 : (double) missesWeight / requestsWeight;
+  }
+
+  public double weightedDelayedMissRate() {
+    long requestsWeight = requestsWeight();
+    return (requestsWeight == 0) ? 1.0 : (double) delayedHitWeight / requestsWeight;
   }
 
   public double admissionRate() {
