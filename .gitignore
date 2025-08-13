@@ -18,3 +18,5 @@ target
 simulator/src/main/resources/application.conf
 *.log
 *.log.lck
+*.quota-dump
+*.dump
