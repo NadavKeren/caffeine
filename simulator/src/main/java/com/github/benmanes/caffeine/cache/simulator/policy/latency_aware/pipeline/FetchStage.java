@@ -11,13 +11,13 @@ import java.util.NoSuchElementException;
 @SuppressWarnings("unchecked")
 public class FetchStage {
     final private static float DEFAULT_LOAD_FACTOR = 0.875f;
-    private final KeyAndAvailabilityTimePair[] heap;
+    private final KeyAndAvailabilityTimePairs[] heap;
     private final Long2ObjectOpenHashMap<AccessEvent> valuesMap;
     protected int size;
     final protected int maxSize;
 
     public FetchStage(int maxSize) {
-        this.heap = new KeyAndAvailabilityTimePair[maxSize];
+        this.heap = new KeyAndAvailabilityTimePairs[maxSize];
         this.valuesMap = new Long2ObjectOpenHashMap<>(maxSize, DEFAULT_LOAD_FACTOR);
         this.valuesMap.defaultReturnValue(null);
         this.size = 0;
@@ -33,7 +33,7 @@ public class FetchStage {
 
     public void insert(AccessEvent event) {
         Assert.assertCondition(this.size <= this.heap.length, "Insertion into a full Fetch Stage");
-        this.heap[this.size++] = new KeyAndAvailabilityTimePair(event.key(), event.getAvailabilityTime());
+        this.heap[this.size++] = new KeyAndAvailabilityTimePairs(event.key(), event.getAvailabilityTime());
         this.valuesMap.put(event.key(), event);
         upHeap(this.size - 1);
     }
@@ -81,8 +81,8 @@ public class FetchStage {
         final int originIdx = i;
         Assert.assertCondition(i < size && i >= 0, () -> String.format("Invalid index: %d in size %d", originIdx, size));
 
-        KeyAndAvailabilityTimePair targetItem = heap[i];
-        KeyAndAvailabilityTimePair minimalChild;
+        KeyAndAvailabilityTimePairs targetItem = heap[i];
+        KeyAndAvailabilityTimePairs minimalChild;
         int leftChildIdx = (i << 1) + 1;
         int rightChildIdx = leftChildIdx + 1;
         int minimalChildIdx;
@@ -117,9 +117,9 @@ public class FetchStage {
         final int originIdx = i;
         Assert.assertCondition(i < size && i >= 0, () -> String.format("Invalid index: %d in size %d", originIdx, size));
 
-        KeyAndAvailabilityTimePair target = heap[i];
+        KeyAndAvailabilityTimePairs target = heap[i];
         int parentIdx;
-        KeyAndAvailabilityTimePair parent;
+        KeyAndAvailabilityTimePairs parent;
         boolean isWellPositioned = false;
 
         while(i != 0 && !isWellPositioned) {
@@ -150,7 +150,7 @@ public class FetchStage {
 
     private void validate() {
         for (int i = 0; i < size; ++i) {
-            final KeyAndAvailabilityTimePair entry = heap[i];
+            final KeyAndAvailabilityTimePairs entry = heap[i];
             final int idx = i;
             Assert.assertCondition(this.valuesMap.containsKey(entry.key()),
                                    () -> String.format("No value stored for the key: %s at index: %d", entry, idx));
@@ -169,11 +169,11 @@ public class FetchStage {
         this.size = 0;
     }
 
-    private static class KeyAndAvailabilityTimePair {
+    private static class KeyAndAvailabilityTimePairs {
         final private long key;
         final private double arrivalTime;
 
-        public KeyAndAvailabilityTimePair(long key, double arrivalTime) {
+        public KeyAndAvailabilityTimePairs(long key, double arrivalTime) {
             this.key = key;
             this.arrivalTime = arrivalTime;
         }
