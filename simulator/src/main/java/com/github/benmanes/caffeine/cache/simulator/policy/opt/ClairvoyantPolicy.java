@@ -15,6 +15,10 @@
  */
 package com.github.benmanes.caffeine.cache.simulator.policy.opt;
 
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Queue;
 
@@ -32,7 +36,8 @@ import it.unimi.dsi.fastutil.ints.IntRBTreeSet;
 import it.unimi.dsi.fastutil.ints.IntSortedSet;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
+
+import javax.annotation.Nullable;
 
 /**
  * {@literal Bélády's} optimal page replacement policy. The upper bound of the hit rate is estimated
@@ -42,12 +47,14 @@ import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
  */
 @PolicySpec(name = "opt.Clairvoyant")
 public final class ClairvoyantPolicy implements Policy {
+  private static final boolean DEBUG = true;
   private final Long2ObjectMap<IntPriorityQueue> accessTimes;
   private final PolicyStats policyStats;
   private final IntSortedSet data;
   private final int maximumSize;
+  @Nullable private PrintWriter resultsDump = null;
 
-  private Recorder recorder;
+  @Nullable private Recorder recorder;
 
   private int infiniteTimestamp;
   private int tick;
@@ -59,12 +66,16 @@ public final class ClairvoyantPolicy implements Policy {
     policyStats = new PolicyStats(name());
     infiniteTimestamp = Integer.MAX_VALUE;
     data = new IntRBTreeSet();
+    if (DEBUG) {
+      System.out.println("ClairvoyantPolicy with dump");
+      prepareResultsDump();
+    }
   }
 
   @Override
   public void record(AccessEvent event) {
     if (recorder == null) {
-      recorder = event.isPenaltyAware() ? new EventRecorder() : new KeyOnlyRecorder();
+      recorder = new EventRecorder();
     }
 
     tick++;
@@ -89,10 +100,14 @@ public final class ClairvoyantPolicy implements Policy {
       recorder.process();
     }
     policyStats.stopwatch().stop();
+    if (resultsDump != null) {
+      resultsDump.flush();
+      resultsDump.close();
+    }
   }
 
   /** Performs the cache operations for the given key. */
-  private void process(long key, double hitPenalty, double missPenalty) {
+  private void process(double reqTime, long key, double hitPenalty, double missPenalty) {
     IntPriorityQueue times = accessTimes.get(key);
 
     int lastAccess = times.dequeueInt();
@@ -107,9 +122,15 @@ public final class ClairvoyantPolicy implements Policy {
     if (found) {
       policyStats.recordHit();
       policyStats.recordHitPenalty(hitPenalty);
+      if (resultsDump != null) {
+        resultsDump.println(String.format("%.0f %d 1", reqTime, key));
+      }
     } else {
       policyStats.recordMiss();
       policyStats.recordMissPenalty(missPenalty);
+      if (resultsDump != null) {
+        resultsDump.println(String.format("%.0f %d 0", reqTime, key));
+      }
       if (data.size() > maximumSize) {
         evict();
       }
@@ -128,19 +149,17 @@ public final class ClairvoyantPolicy implements Policy {
     void process();
   }
 
-  private final class KeyOnlyRecorder implements Recorder {
-    private final LongArrayFIFOQueue future;
-
-    KeyOnlyRecorder() {
-      future = new LongArrayFIFOQueue(maximumSize);
-    }
-    @Override public void add(AccessEvent event) {
-      future.enqueue(event.key());
-    }
-    @Override public void process() {
-      while (!future.isEmpty()) {
-        ClairvoyantPolicy.this.process(future.dequeueLong(), 0.0, 0.0);
-      }
+  private void prepareResultsDump() {
+    String currentDir = System.getProperty("user.dir");
+    try {
+      String filename = currentDir + "/Belady.results-dump";
+      System.out.println("Writing results to " + filename);
+      FileWriter fwriter = new FileWriter(filename, StandardCharsets.UTF_8);
+      resultsDump = new PrintWriter(fwriter);
+    } catch (IOException e) {
+      System.err.println("Error creating the log file handler");
+      e.printStackTrace();
+      System.exit(1);
     }
   }
 
@@ -156,7 +175,7 @@ public final class ClairvoyantPolicy implements Policy {
     @Override public void process() {
       while (!future.isEmpty()) {
         AccessEvent event = future.poll();
-        ClairvoyantPolicy.this.process(event.key(), event.hitPenalty(), event.missPenalty());
+        ClairvoyantPolicy.this.process(event.getRequestTime(), event.key(), event.hitPenalty(), event.missPenalty());
       }
     }
   }
