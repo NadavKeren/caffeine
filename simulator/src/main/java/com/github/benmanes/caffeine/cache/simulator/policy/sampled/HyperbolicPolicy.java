@@ -61,7 +61,7 @@ public class HyperbolicPolicy implements Policy {
         this.data = new Long2ObjectOpenHashMap<>();
         this.sampleSize = settings.sampleSize();
         this.table = new Node[maximumSize + 1];
-        this.fetchStage = new FetchStage(this.maximumSize * 10);
+        this.fetchStage = new FetchStage((int) Math.max(Math.min(maximumSize * 10, Integer.MAX_VALUE >> 10), 100000));
         this.fetchedItems = new Long2ObjectOpenHashMap<>(this.maximumSize * 2);
     }
 

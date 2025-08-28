@@ -94,7 +94,7 @@ public final class S3FifoPolicy implements Policy {
     this.maxGhost = (long) (maximumSize * settings.percentGhost());
     this.maxMain = maximumSize - maxSmall;
 
-    this.fetchStage = new FetchStage((int) Math.min(this.maximumSize * 10, Integer.MAX_VALUE >> 10));
+    this.fetchStage = new FetchStage((int) Math.max(Math.min(this.maximumSize * 10, Integer.MAX_VALUE >> 10), 100000));
   }
 
   @Override

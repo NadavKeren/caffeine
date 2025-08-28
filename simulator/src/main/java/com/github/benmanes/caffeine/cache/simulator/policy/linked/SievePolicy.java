@@ -66,7 +66,7 @@ public final class SievePolicy implements Policy {
     this.policyStats = new PolicyStats(name());
     var settings = new BasicSettings(config);
     this.maximumSize = settings.maximumSize();
-    this.fetchStage = new FetchStage((int) Math.min(maximumSize * 10, Integer.MAX_VALUE >> 10));
+    this.fetchStage = new FetchStage((int) Math.max(Math.min(maximumSize * 10, Integer.MAX_VALUE >> 10), 100000));
   }
 
   @Override

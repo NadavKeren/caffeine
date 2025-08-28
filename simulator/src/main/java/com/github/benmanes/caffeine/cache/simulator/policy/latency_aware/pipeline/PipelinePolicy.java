@@ -107,7 +107,7 @@ public class PipelinePolicy implements Policy {
         Assert.assertCondition(quantumSize > 0, () -> String.format("The sampling order is too high: %d", shrinkOrder));
         cacheCapacity = totalQuanta * quantumSize;
 
-        fetchingStage = new FetchStage(10 * cacheCapacity);
+        fetchingStage = new FetchStage((int) Math.max(100000, cacheCapacity));
 
         blockCount = settings.numOfBlocks();
         quota = new int[blockCount];

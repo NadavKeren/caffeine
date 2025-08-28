@@ -14,7 +14,7 @@ public class MockupLAPolicy implements Policy {
     public MockupLAPolicy(Config config) {
         final String policyName = config.getString("mockup.policy-name");
         stats = new PolicyStats("%s", policyName);
-        fetchStage = new FetchStage((int) config.getLong("maximum-size"));
+        this.fetchStage = new FetchStage((int) Math.max(Math.min(config.getLong("maximum-size") * 10, Integer.MAX_VALUE >> 10), 100000));
     }
 
     @Override

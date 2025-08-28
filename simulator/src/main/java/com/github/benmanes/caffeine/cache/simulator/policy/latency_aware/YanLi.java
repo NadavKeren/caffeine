@@ -37,7 +37,7 @@ public class YanLi implements Policy {
         BasicSettings settings = new BasicSettings(config);
         this.cacheSize = (int) settings.maximumSize();
         items = new Long2ObjectOpenHashMap<>((int) (this.cacheSize / DEFAULT_LOAD_FACTOR), DEFAULT_LOAD_FACTOR);
-        fetchStage = new FetchStage(this.cacheSize * 10);
+        this.fetchStage = new FetchStage((int) Math.max(Math.min(cacheSize * 10, Integer.MAX_VALUE >> 10), 100000));
     }
 
     @Override

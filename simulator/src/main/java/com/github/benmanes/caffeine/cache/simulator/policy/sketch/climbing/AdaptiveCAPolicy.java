@@ -112,7 +112,7 @@ public final class AdaptiveCAPolicy implements Policy {
     this.maxDeltaCounts = 0;
     this.samplesCount = 0;
 
-    this.fetchStage = new FetchStage(this.cacheCapacity * 10);
+    this.fetchStage = new FetchStage((int) Math.max(Math.min(this.cacheCapacity * 10, Integer.MAX_VALUE >> 10), 100000));
 
     resetTimeFrameCounters();
 
