@@ -153,7 +153,7 @@ public class FetchStage {
             final KeyAndAvailabilityTimePairs entry = heap[i];
             final int idx = i;
             Assert.assertCondition(this.valuesMap.containsKey(entry.key()),
-                                   () -> String.format("No value stored for the key: %s at index: %d", entry, idx));
+                                   () -> String.format("No value stored for the key: %s at index: %d", entry.key(), idx));
 
             Assert.assertCondition(2 * i + 1 >= size || entry.arrivalTime() <= heap[2 * i + 1].arrivalTime(),
                                    () -> String.format("Bad ordering at index %d with %d", idx, 2 * idx + 1));
