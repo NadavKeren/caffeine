@@ -35,6 +35,7 @@ import com.github.benmanes.caffeine.cache.simulator.parser.gradle.GradleTraceRea
 import com.github.benmanes.caffeine.cache.simulator.parser.kaggle.OutbrainTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.key_only.SimpleKeyOnlyReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.latency.LatencyTraceReader;
+import com.github.benmanes.caffeine.cache.simulator.parser.latency.LatencyWithMarksTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.latency.LatencyWithOracleTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.lirs.LirsTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.lrb.LrbTraceReader;
@@ -74,6 +75,7 @@ public enum TraceFormat {
   GRADLE(GradleTraceReader::new),
   LATENCY(LatencyTraceReader::new),
   LATENCY_ORACLE(LatencyWithOracleTraceReader::new),
+  LATENCY_RESULT(LatencyWithMarksTraceReader::new),
   LIRS(LirsTraceReader::new),
   LRB(LrbTraceReader::new),
   OUTBRAIN(OutbrainTraceReader::new),

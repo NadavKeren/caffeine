@@ -134,6 +134,12 @@ public class AccessEvent {
     return new PenaltiesAccessEvent(key, hitPenalty, missPenalty, arrivalTime);
   }
 
+  public static AccessEvent forKeyPenaltiesArrivalTimeAndResult(long key, double hitPenalty, double missPenalty, double arrivalTime, int result) {
+    PenaltiesAccessEvent event = new PenaltiesAccessEvent(key, hitPenalty, missPenalty, arrivalTime);
+    event.changeEventStatus(result == 0 ? EventStatus.MISS : EventStatus.HIT);
+    return event;
+  }
+
   private static final class WeightedAccessEvent extends AccessEvent {
     private final int weight;
 
