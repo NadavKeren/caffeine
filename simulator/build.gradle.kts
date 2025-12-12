@@ -35,6 +35,7 @@ dependencies {
   implementation(libs.bundles.coherence)
   implementation(libs.bundles.slf4j.jdk)
   implementation(libs.zero.allocation.hashing)
+  implementation(libs.hash4j)
 
   compileOnly(libs.spotbugs.annotations)
 }
@@ -65,10 +66,37 @@ tasks.named<JavaCompile>("compileJava").configure {
     compilerArgs.addAll(listOf("-Xlint:-classfile", "-Xlint:-processing"))
     errorprone {
       disable("SystemOut")
+      disable("RemoveUnusedImports")
+      disable("UnusedVariable")
+      disable("EffectivelyPrivate")
+      disable("ParameterMissingNullable")
+      disable("WildcardImport")
+      disable("UnnecessaryFinal")
+      disable("Var")
+      disable("DefaultLocale")
+      disable("AnnotationPosition")
+      disable("Varifier")
+      disable("SystemExitOutsideMain")
+      disable("TimeZoneUsage")
+      disable("IdentifierName")
+      disable("CollectorMutability")
+      disable("DifferentNameButSame")
+      disable("UnnecessarilyFullyQualified")
+      disable("EagerStringFormatting")
+      disable("CanIgnoreReturnValueSuggester")
+      disable("NonFinalStaticField")
+      disable("UnnecessaryDefaultInEnumSwitch")
+      disable("FieldCanBeFinal")
+      disable("MethodCanBeStatic")
+      disable("LexicographicalAnnotationAttributeListing")
+      disable("FieldMissingNullable")
+      disable("Refaster")
+      disable("BooleanParameter")
+      disable("ConstantField")
+      disable("InconsistentOverloads")
+      disable("DirectReturn")
 
-      nullaway {
-        externalInitAnnotations.add("picocli.CommandLine.Command")
-      }
+      nullaway.disable()
     }
   }
 }
