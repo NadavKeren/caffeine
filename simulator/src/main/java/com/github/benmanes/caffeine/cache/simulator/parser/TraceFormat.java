@@ -37,6 +37,10 @@ import com.github.benmanes.caffeine.cache.simulator.parser.corda.CordaTraceReade
 import com.github.benmanes.caffeine.cache.simulator.parser.glcache.GLCacheTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.gradle.GradleTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.kaggle.OutbrainTraceReader;
+import com.github.benmanes.caffeine.cache.simulator.parser.key_only.SimpleKeyOnlyReader;
+import com.github.benmanes.caffeine.cache.simulator.parser.latency.LatencyTraceReader;
+import com.github.benmanes.caffeine.cache.simulator.parser.latency.LatencyWithMarksTraceReader;
+import com.github.benmanes.caffeine.cache.simulator.parser.latency.LatencyWithOracleTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.libcachesim.csv.LibCacheSimCsvTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.libcachesim.twitter.LibCacheSimTwitterTraceReader;
 import com.github.benmanes.caffeine.cache.simulator.parser.lirs.LirsTraceReader;
@@ -80,12 +84,14 @@ public enum TraceFormat {
   CORDA(CordaTraceReader::new),
   GL_CACHE(GLCacheTraceReader::new),
   GRADLE(GradleTraceReader::new),
-  LCS_TRACE(LibCacheSimCsvTraceReader::new),
-  LCS_TWITTER(LibCacheSimTwitterTraceReader::new),
+  LATENCY(LatencyTraceReader::new),
+  LATENCY_ORACLE(LatencyWithOracleTraceReader::new),
+  LATENCY_RESULT(LatencyWithMarksTraceReader::new),
   LIRS(LirsTraceReader::new),
   LRB(LrbTraceReader::new),
   OUTBRAIN(OutbrainTraceReader::new),
   SCARAB(ScarabTraceReader::new),
+  SIMPLE_KEY_ONLY(SimpleKeyOnlyReader::new),
   SNIA_CAMBRIDGE(CambridgeTraceReader::new),
   SNIA_ENTERPRISE(EnterpriseTraceReader::new),
   SNIA_K5CLOUD(K5cloudTraceReader::new),
