@@ -46,6 +46,9 @@ import com.github.benmanes.caffeine.cache.simulator.policy.irr.FrdPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.irr.HillClimberFrdPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.irr.IndicatorFrdPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.irr.LirsPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.YanLi;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.PipelinePolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.SampledHillClimber;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.FrequentlyUsedPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.LinkedPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.MultiQueuePolicy;
@@ -62,6 +65,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.product.ExpiringMapPo
 import com.github.benmanes.caffeine.cache.simulator.policy.product.GuavaPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.product.HazelcastPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.product.TCachePolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sampled.HyperbolicPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sampled.SampledPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowTinyLfuPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.HillClimberWindowTinyLfuPolicy;
@@ -74,6 +78,8 @@ import com.github.benmanes.caffeine.cache.simulator.policy.sketch.segment.S4Wind
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.tinycache.TinyCachePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.tinycache.TinyCacheWithGhostCachePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.tinycache.WindowTinyCachePolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.WindowCAPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.sketch.climbing.AdaptiveCAPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.two_queue.S3FifoPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.two_queue.TuQueuePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.two_queue.TwoQueuePolicy;
@@ -120,6 +126,13 @@ public final class Registry {
     registerTwoQueue();
     registerAdaptive();
     registerGreedyDual();
+    registerLatencyAware();
+  }
+
+  private void registerLatencyAware() {
+    register(YanLi.class, YanLi::new);
+    register(PipelinePolicy.class, PipelinePolicy::policy);
+    register(SampledHillClimber.class, SampledHillClimber::new);
   }
 
   /** Registers the policy based on the annotated name. */
@@ -173,6 +186,7 @@ public final class Registry {
       registerMany(policy.label(), SampledPolicy.class,
           config -> SampledPolicy.policies(config, policy));
     }
+    registerMany(HyperbolicPolicy.class, HyperbolicPolicy::policies);
   }
 
   private void registerTwoQueue() {
@@ -183,6 +197,7 @@ public final class Registry {
 
   private void registerSketch() {
     registerMany(WindowTinyLfuPolicy.class, WindowTinyLfuPolicy::policies);
+    registerMany(WindowCAPolicy.class, WindowCAPolicy::policies);
     registerMany(S4WindowTinyLfuPolicy.class, S4WindowTinyLfuPolicy::policies);
     registerMany(LruWindowTinyLfuPolicy.class, LruWindowTinyLfuPolicy::policies);
     registerMany(RandomWindowTinyLfuPolicy.class, RandomWindowTinyLfuPolicy::policies);
@@ -193,6 +208,7 @@ public final class Registry {
     registerMany(FeedbackWindowTinyLfuPolicy.class, FeedbackWindowTinyLfuPolicy::policies);
 
     registerMany(HillClimberWindowTinyLfuPolicy.class, HillClimberWindowTinyLfuPolicy::policies);
+    registerMany(AdaptiveCAPolicy.class, AdaptiveCAPolicy::policies);
 
     register(TinyCachePolicy.class, TinyCachePolicy::new);
     register(WindowTinyCachePolicy.class, WindowTinyCachePolicy::new);
