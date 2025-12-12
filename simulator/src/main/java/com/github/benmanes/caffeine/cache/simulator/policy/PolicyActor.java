@@ -35,6 +35,7 @@ public final class PolicyActor {
   private final Semaphore semaphore;
   private final Policy policy;
   private final Thread parent;
+  private int eventNumber = 0;
 
   private CompletableFuture<@Nullable Void> future;
 
@@ -93,18 +94,17 @@ public final class PolicyActor {
       this.events = requireNonNull(events);
     }
     @Override public void execute() {
-      policy.stats().stopwatch().start();
-      for (AccessEvent event : events) {
-        long priorMisses = policy.stats().missCount();
-        long priorHits = policy.stats().hitCount();
-        policy.record(event);
-
-        if (policy.stats().hitCount() > priorHits) {
-          policy.stats().recordHitPenalty(event.hitPenalty());
-        } else if (policy.stats().missCount() > priorMisses) {
-          policy.stats().recordMissPenalty(event.missPenalty());
+        policy.stats().stopwatch().start();
+        for (AccessEvent event : events) {
+          event.setEventNum(++eventNumber);
+          try {
+            policy.record(event);
+          } catch (RuntimeException | AssertionError e) {
+            System.err.println("Error on event: " + event.eventNum());
+            e.printStackTrace();
+            System.exit(1);
+          }
         }
-      }
       policy.stats().stopwatch().stop();
     }
   }

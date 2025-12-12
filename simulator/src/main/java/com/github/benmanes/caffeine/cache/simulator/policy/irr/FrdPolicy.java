@@ -21,7 +21,8 @@ import static java.util.Objects.requireNonNull;
 import org.jspecify.annotations.Nullable;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
-import com.github.benmanes.caffeine.cache.simulator.policy.Policy.KeyOnlyPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
+import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy.PolicySpec;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.google.common.base.MoreObjects;
@@ -52,7 +53,7 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  * @author ben.manes@gmail.com (Ben Manes)
  */
 @PolicySpec(name = "irr.Frd")
-public final class FrdPolicy implements KeyOnlyPolicy {
+public final class FrdPolicy implements Policy {
   final Long2ObjectMap<Node> data;
   final PolicyStats policyStats;
   final Node headFilter;
@@ -69,35 +70,54 @@ public final class FrdPolicy implements KeyOnlyPolicy {
     this.maximumSize = Math.toIntExact(settings.maximumSize());
     this.maximumMainResidentSize = (int) (maximumSize * settings.percentMain());
     this.maximumFilterSize = maximumSize - maximumMainResidentSize;
-    this.policyStats = new PolicyStats(name());
+    this.policyStats = new PolicyStats("FRD");
     this.data = new Long2ObjectOpenHashMap<>();
     this.headFilter = new Node();
     this.headMain = new Node();
   }
 
   @Override
-  public void record(long key) {
+  public void record(AccessEvent event) {
+    long key = event.key();
     policyStats.recordOperation();
     @Var Node node = data.get(key);
     if (node == null) {
-      node = new Node(key);
-      data.put(key,node);
+      node = new Node(event);
+      data.put(key, node);
       onMiss(node);
+      policyStats.recordMiss();
+      policyStats.recordMissPenalty(event.missPenalty());
     } else if (node.status == Status.FILTER) {
       onFilterHit(node);
+      recordAccordingToAvailability(node.event, event);
     } else if (node.status == Status.MAIN) {
       onMainHit(node);
+      recordAccordingToAvailability(node.event, event);
     } else if (node.status == Status.NON_RESIDENT) {
       onNonResidentHit(node);
+      policyStats.recordMiss();
+      policyStats.recordMissPenalty(event.missPenalty());
     } else {
       throw new IllegalStateException();
+    }
+  }
+
+  private void recordAccordingToAvailability(AccessEvent fetchEvent, AccessEvent currEvent) {
+    if (fetchEvent.isAvailableAt(currEvent.getRequestTime())) {
+      currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
+      policyStats.recordHit();
+      policyStats.recordHitPenalty(currEvent.hitPenalty());
+    } else {
+      currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+      currEvent.setDelayedHitPenalty(fetchEvent.getAvailabilityTime());
+      policyStats.recordDelayedHit();
+      policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
     }
   }
 
   private void onMiss(Node node) {
     // Initially, both the filter and reuse distance stacks are filled with newly arrived blocks
     // from the reuse distance stack to the filter stack.
-    policyStats.recordMiss();
 
     if (residentSize < maximumMainResidentSize) {
       onMainWarmupMiss(node);
@@ -132,7 +152,7 @@ public final class FrdPolicy implements KeyOnlyPolicy {
     if (victim.isInMain) {
       victim.status = Status.NON_RESIDENT;
     } else {
-      data.remove(victim.key);
+      data.remove(victim.event.key());
     }
 
     node.moveToTop(StackType.FILTER);
@@ -145,7 +165,6 @@ public final class FrdPolicy implements KeyOnlyPolicy {
     // stack. The associated history block should be updated to maintain reuse distance order (i.e.,
     // move its history block in the reuse distance stack to the MRU position of the reuse distance
     // stack).
-    policyStats.recordHit();
 
     node.moveToTop(StackType.FILTER);
     node.moveToTop(StackType.MAIN);
@@ -156,7 +175,6 @@ public final class FrdPolicy implements KeyOnlyPolicy {
     // the reuse distance stack. If the corresponding block is in the LRU position of the reuse
     // distance stack (i.e., the oldest resident block), the history blocks between the LRU position
     // and the 2nd oldest resident block are removed. Otherwise, no history block removing occurs.
-    policyStats.recordHit();
 
     boolean wasBottom = (headMain.prevMain == node);
     node.moveToTop(StackType.MAIN);
@@ -176,7 +194,7 @@ public final class FrdPolicy implements KeyOnlyPolicy {
       } else if (bottom.status == Status.NON_RESIDENT) {
         policyStats.recordOperation();
         bottom.removeFrom(StackType.MAIN);
-        data.remove(bottom.key);
+        data.remove(bottom.event.key());
       }
     }
   }
@@ -187,17 +205,16 @@ public final class FrdPolicy implements KeyOnlyPolicy {
     // move the history hit block to the MRU position in the reuse distance stack and change it to a
     // resident block. No insertion or eviction occurs in the filter stack.
     policyStats.recordEviction();
-    policyStats.recordMiss();
 
     pruneStack();
     Node victim = requireNonNull(headMain.prevMain);
     victim.removeFrom(StackType.MAIN);
-    data.remove(victim.key);
+    data.remove(victim.event.key());
     pruneStack();
 
     node.moveToTop(StackType.MAIN);
     node.status = Status.MAIN;
-    data.put(node.key, node);
+    data.put(node.event.key(), node);
   }
 
   @Override
@@ -233,6 +250,7 @@ public final class FrdPolicy implements KeyOnlyPolicy {
 
   final class Node {
     final long key;
+    final @Nullable AccessEvent event;
 
     @Nullable Node prevFilter;
     @Nullable Node nextFilter;
@@ -247,10 +265,12 @@ public final class FrdPolicy implements KeyOnlyPolicy {
       key = Long.MIN_VALUE;
       prevMain = nextMain = this;
       prevFilter = nextFilter = this;
+      event = null;
     }
 
-    Node(long key) {
-      this.key = key;
+    Node(AccessEvent event) {
+      this.key = event.key();
+      this.event = event;
     }
 
     public boolean isInStack(StackType stackType) {
@@ -314,10 +334,12 @@ public final class FrdPolicy implements KeyOnlyPolicy {
 
     @Override
     public String toString() {
-      return MoreObjects.toStringHelper(this)
-          .add("key", key)
-          .add("type", status)
-          .toString();
+      return this.event != null
+             ? MoreObjects.toStringHelper(this)
+                          .add("key", event.key())
+                          .add("type", status)
+                          .toString()
+             : "Sentinel";
     }
   }
 

@@ -21,7 +21,8 @@ import static java.util.Objects.requireNonNull;
 import org.jspecify.annotations.Nullable;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
-import com.github.benmanes.caffeine.cache.simulator.policy.Policy.KeyOnlyPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
+import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy.PolicySpec;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.google.common.base.MoreObjects;
@@ -47,8 +48,9 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  *
  * @author ben.manes@gmail.com (Ben Manes)
  */
+@SuppressWarnings("NullAway")
 @PolicySpec(name = "adaptive.Arc")
-public final class ArcPolicy implements KeyOnlyPolicy {
+public final class ArcPolicy implements Policy {
   // In Cache:
   // - T1: Pages that have been accessed at least once
   // - T2: Pages that have been accessed at least twice
@@ -75,7 +77,7 @@ public final class ArcPolicy implements KeyOnlyPolicy {
   private int p;
 
   public ArcPolicy(Config config) {
-    var settings = new BasicSettings(config);
+    BasicSettings settings = new BasicSettings(config);
     this.maximumSize = Math.toIntExact(settings.maximumSize());
     this.policyStats = new PolicyStats(name());
     this.data = new Long2ObjectOpenHashMap<>();
@@ -86,17 +88,33 @@ public final class ArcPolicy implements KeyOnlyPolicy {
   }
 
   @Override
-  public void record(long key) {
+  public void record(AccessEvent event) {
+    long key = event.key();
     policyStats.recordOperation();
-    Node node = data.get(key);
+    @Nullable Node node = data.get(key);
     if (node == null) {
-      onMiss(key);
+      onMiss(event);
     } else if (node.type == QueueType.B1) {
       onHitB1(node);
     } else if (node.type == QueueType.B2) {
       onHitB2(node);
     } else {
       onHit(node);
+      assert node.event != null;
+      recordAccordingToAvailability(node.event, event);
+    }
+  }
+
+  private void recordAccordingToAvailability(AccessEvent fetchEvent, AccessEvent currEvent) {
+    if (fetchEvent.isAvailableAt(currEvent.getRequestTime())) {
+      currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
+      policyStats.recordHit();
+      policyStats.recordHitPenalty(currEvent.hitPenalty());
+    } else {
+      currEvent.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+      currEvent.setDelayedHitPenalty(fetchEvent.getAvailabilityTime());
+      policyStats.recordDelayedHit();
+      policyStats.recordDelayedHitPenalty(currEvent.delayedHitPenalty());
     }
   }
 
@@ -127,6 +145,8 @@ public final class ArcPolicy implements KeyOnlyPolicy {
     node.type = QueueType.T2;
     node.appendToTail(headT2);
     policyStats.recordMiss();
+    assert node.event != null;
+    policyStats.recordMissPenalty(node.event.missPenalty());
   }
 
   private void onHitB2(Node node) {
@@ -143,9 +163,11 @@ public final class ArcPolicy implements KeyOnlyPolicy {
     node.type = QueueType.T2;
     node.appendToTail(headT2);
     policyStats.recordMiss();
+    assert node.event != null;
+    policyStats.recordMissPenalty(node.event.missPenalty());
   }
 
-  private void onMiss(long key) {
+  private void onMiss(AccessEvent event) {
     // x ∈ L1 ∪ L2 (a miss in DBL(2c) and ARC(c)):
     // case (i) |L1| = c:
     //   If |T1| < c then delete the LRU page of B1 and REPLACE(p).
@@ -155,29 +177,32 @@ public final class ArcPolicy implements KeyOnlyPolicy {
     //   REPLACE(p) .
     // Put x at the top of T1 and place it in the cache.
 
-    var node = new Node(key);
+    Node node = new Node(event);
     node.type = QueueType.T1;
 
     int sizeL1 = (sizeT1 + sizeB1);
     int sizeL2 = (sizeT2 + sizeB2);
     if (sizeL1 == maximumSize) {
       if (sizeT1 < maximumSize) {
-        Node victim = requireNonNull(headB1.next);
-        data.remove(victim.key);
+        Node victim = headB1.next;
+        assert victim != null && victim.event != null;
+        data.remove(victim.event.key());
         victim.remove();
         sizeB1--;
 
         evict(node);
       } else {
-        Node victim = requireNonNull(headT1.next);
-        data.remove(victim.key);
+        Node victim = headT1.next;
+        assert victim != null && victim.event != null;
+        data.remove(victim.event.key());
         victim.remove();
         sizeT1--;
       }
     } else if ((sizeL1 < maximumSize) && ((sizeL1 + sizeL2) >= maximumSize)) {
       if ((sizeL1 + sizeL2) >= (2 * maximumSize)) {
-        Node victim = requireNonNull(headB2.next);
-        data.remove(victim.key);
+        Node victim = headB2.next;
+        assert victim != null && victim.event != null;
+        data.remove(victim.event.key());
         victim.remove();
         sizeB2--;
       }
@@ -185,10 +210,11 @@ public final class ArcPolicy implements KeyOnlyPolicy {
     }
 
     sizeT1++;
-    data.put(key, node);
+    data.put(event.key(), node);
     node.appendToTail(headT1);
 
     policyStats.recordMiss();
+    policyStats.recordMissPenalty(event.missPenalty());
   }
 
   /** Evicts while the map exceeds the maximum capacity. */
@@ -238,20 +264,21 @@ public final class ArcPolicy implements KeyOnlyPolicy {
   }
 
   static final class Node {
-    final long key;
+    @Nullable
+    final AccessEvent event;
 
     @Nullable Node prev;
     @Nullable Node next;
     @Nullable QueueType type;
 
     Node() {
-      this.key = Long.MIN_VALUE;
+      this.event = null;
       this.prev = this;
       this.next = this;
     }
 
-    Node(long key) {
-      this.key = key;
+    Node(AccessEvent event) {
+      this.event = event;
     }
 
     /** Appends the node to the tail of the list. */
@@ -276,10 +303,12 @@ public final class ArcPolicy implements KeyOnlyPolicy {
 
     @Override
     public String toString() {
-      return MoreObjects.toStringHelper(this)
-          .add("key", key)
-          .add("type", type)
-          .toString();
+      return this.event != null
+             ? MoreObjects.toStringHelper(this)
+                          .add("key", event.key())
+                          .add("type", type)
+                          .toString()
+             : "Sentinel";
     }
   }
 }

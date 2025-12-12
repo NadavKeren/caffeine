@@ -23,7 +23,6 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
 import org.jspecify.annotations.Nullable;
 
 import com.google.common.base.MoreObjects;
-import com.google.errorprone.annotations.Immutable;
 import com.google.errorprone.annotations.Var;
 
 /**
@@ -31,13 +30,20 @@ import com.google.errorprone.annotations.Var;
  *
  * @author ben.manes@gmail.com (Ben Manes)
  */
-@Immutable
 public class AccessEvent {
   private final long key;
+  private EventStatus status = EventStatus.MISS;
+  private int eventNum = -1;
 
   private AccessEvent(long key) {
     this.key = key;
   }
+
+  public void setEventNum(int eventNum) {
+    this.eventNum = eventNum;
+  }
+
+  public int eventNum() { return eventNum; }
 
   /** Returns the key. */
   public long key() {
@@ -63,11 +69,30 @@ public class AccessEvent {
   public double missPenalty() {
     return 0;
   }
+  public double delayedHitPenalty() { return 0; }
+  public void setDelayedHitPenalty(double availabilityTime) { throw new UnsupportedOperationException(); }
+
+  /** Return the real cost of missing this entry */
+
+  public void changeEventStatus(EventStatus status) { this.status = status; }
+
+  public EventStatus getStatus() { return status; }
+
+  public boolean isAvailableAt(double time) { return true; }
+  public double getRequestTime() { return 0; }
+  public double getAvailabilityTime() { return 0; }
+
+  /** Returns the delta of the penalties for this entry*/
+  public double delta() {
+    return this.missPenalty() - this.hitPenalty();
+  }
 
   /** Returns if the trace supplies the hit/miss penalty for this entry. */
   public boolean isPenaltyAware() {
     return false;
   }
+
+  public void updateHitPenalty(double hitPenalty) {}
 
   @Override
   public boolean equals(@Nullable Object o) {
@@ -105,7 +130,17 @@ public class AccessEvent {
 
   /** Returns an event for the given key and penalties. */
   public static AccessEvent forKeyAndPenalties(long key, double hitPenalty, double missPenalty) {
-    return new PenaltiesAccessEvent(key, hitPenalty, missPenalty);
+    return new PenaltiesAccessEvent(key, hitPenalty, missPenalty, 0);
+  }
+
+  public static AccessEvent forKeyPenaltiesAndArrivalTime(long key, double hitPenalty, double missPenalty, double arrivalTime) {
+    return new PenaltiesAccessEvent(key, hitPenalty, missPenalty, arrivalTime);
+  }
+
+  public static AccessEvent forKeyPenaltiesArrivalTimeAndResult(long key, double hitPenalty, double missPenalty, double arrivalTime, int result) {
+    var event = new PenaltiesAccessEvent(key, hitPenalty, missPenalty, arrivalTime);
+    event.changeEventStatus(result == 0 ? EventStatus.MISS : EventStatus.HIT);
+    return event;
   }
 
   private static final class LongInterner {
@@ -137,15 +172,29 @@ public class AccessEvent {
   }
 
   private static final class PenaltiesAccessEvent extends AccessEvent {
-    private final double missPenalty;
-    private final double hitPenalty;
+    final private double missPenalty;
+    private double hitPenalty;
+    private double delayedHitPenalty = 0;
+    private final double requestTime;
+    private final double availabilityTime;
 
-    PenaltiesAccessEvent(long key, double hitPenalty, double missPenalty) {
+    PenaltiesAccessEvent(long key,
+                         double hitPenalty,
+                         double missPenalty,
+                         double requestTime) {
       super(key);
       this.hitPenalty = hitPenalty;
       this.missPenalty = missPenalty;
+      this.hitPenalty = hitPenalty;
+      this.requestTime = requestTime;
+      this.availabilityTime = requestTime + missPenalty;
       checkArgument(hitPenalty >= 0);
-      checkArgument(missPenalty >= hitPenalty);
+      checkArgument(missPenalty >= 0);
+      checkArgument(requestTime >= 0);
+    }
+
+    @Override public void updateHitPenalty(double hitPenalty) {
+      this.hitPenalty = hitPenalty;
     }
     @Override public double missPenalty() {
       return missPenalty;
@@ -153,8 +202,32 @@ public class AccessEvent {
     @Override public double hitPenalty() {
       return hitPenalty;
     }
+
+    @Override
+    public double delayedHitPenalty() { return delayedHitPenalty; }
+
+    @Override
+    public void setDelayedHitPenalty(double availabilityTime) {
+      this.delayedHitPenalty = availabilityTime - this.requestTime;
+    }
+
     @Override public boolean isPenaltyAware() {
       return true;
     }
+
+    @Override
+    public boolean isAvailableAt(double time) { return (availabilityTime <= time); }
+
+    @Override
+    public double getRequestTime() { return requestTime; }
+
+    @Override
+    public double getAvailabilityTime() { return availabilityTime; }
+  }
+
+  public enum EventStatus {
+    MISS,
+    HIT,
+    DELAYED_HIT
   }
 }

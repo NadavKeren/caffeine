@@ -19,6 +19,8 @@ import static com.github.benmanes.caffeine.cache.simulator.policy.Policy.Charact
 import static com.google.common.base.Preconditions.checkState;
 import static java.util.Objects.requireNonNull;
 
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.FetchStage;
+
 import org.jspecify.annotations.Nullable;
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
@@ -45,12 +47,13 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  * @author himelbrand@gmail.com (Omri Himelbrand)
  * @author ben.manes@gmail.com (Ben Manes)
  */
-@SuppressWarnings("MemberName")
+@SuppressWarnings({"MemberName", "NullAway"})
 @PolicySpec(name = "greedy-dual.GDWheel", characteristics = WEIGHTED)
 public final class GDWheelPolicy implements Policy {
   private final Long2ObjectMap<Node> data;
   private final PolicyStats policyStats;
   private final Sentinel[][] wheel;
+  private final FetchStage fetchStage;
   private final long maximumSize;
   private final int[] clockHand;
   private final double[] cost;
@@ -65,6 +68,7 @@ public final class GDWheelPolicy implements Policy {
     this.cost = new double[settings.numberOfWheels()];
     this.clockHand = new int[settings.numberOfWheels()];
     this.wheel = new Sentinel[settings.numberOfWheels()][settings.numberOfQueues()];
+    this.fetchStage = new FetchStage((int) Math.max(Math.min(maximumSize * 10, Integer.MAX_VALUE >> 10), 100000));
 
     for (int i = 0; i < settings.numberOfWheels(); i++) {
       for (int j = 0; j < settings.numberOfQueues(); j++) {
@@ -76,25 +80,44 @@ public final class GDWheelPolicy implements Policy {
 
   @Override
   public void record(AccessEvent event) {
-    @Var Node node = data.get(event.key());
+    insertArrivals(event.getRequestTime());
+
     policyStats.recordOperation();
-    if (node == null) {
-      policyStats.recordWeightedMiss(event.weight());
-      node = new Node(event.key());
-      onMiss(event, node);
+
+    if (fetchStage.contains(event.key())) {
+      onFetchStageHit(event);
     } else {
-      policyStats.recordWeightedHit(event.weight());
-      onHit(event, node);
+      Node node = data.get(event.key());
+      if (node == null) {
+        onMiss(event);
+      } else {
+        onHit(event, node);
+      }
     }
   }
 
-  private void onMiss(AccessEvent event, Node node) {
-    if (event.weight() > maximumSize) {
-      policyStats.recordEviction();
-    } else {
-      evict(event);
-      add(event, node);
+  private void insertArrivals(double timeStamp) {
+    while (fetchStage.size() > 0 && fetchStage.getClosestArrival() < timeStamp) {
+      AccessEvent arrivedEvent = fetchStage.extractClosestArrival();
+      evict(arrivedEvent);
+      add(arrivedEvent, new Node(arrivedEvent.key(), arrivedEvent));
     }
+  }
+
+  private void onFetchStageHit(AccessEvent event) {
+    AccessEvent fetchingEvent = fetchStage.get(event.key());
+    event.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+    event.setDelayedHitPenalty(fetchingEvent.getAvailabilityTime());
+
+    policyStats.recordDelayedHit();
+    policyStats.recordDelayedHitPenalty(event.delayedHitPenalty());
+  }
+
+  private void onMiss(AccessEvent event) {
+    policyStats.recordWeightedMiss(event.weight());
+    policyStats.recordMissPenalty(event.missPenalty());
+
+    fetchStage.insert(event);
   }
 
   private void evict(AccessEvent event) {
@@ -158,7 +181,12 @@ public final class GDWheelPolicy implements Policy {
 
   private void onHit(AccessEvent event, Node node) {
     remove(node);
-    onMiss(event, node);
+    evict(event);
+    add(event, node);
+
+    event.changeEventStatus(AccessEvent.EventStatus.HIT);
+    policyStats.recordHitPenalty(event.hitPenalty());
+    policyStats.recordWeightedHit(event.weight());
   }
 
   private void remove(Node node) {
@@ -218,12 +246,12 @@ public final class GDWheelPolicy implements Policy {
     return policyStats;
   }
 
-  static final class Sentinel extends Node {
+  private static final class Sentinel extends Node {
     final int wheelIndex;
     final int queueIndex;
 
     public Sentinel(int wheelIndex, int queueIndex) {
-      super(Long.MIN_VALUE);
+      super(Long.MIN_VALUE, null);
       this.wheelIndex = wheelIndex;
       this.queueIndex = queueIndex;
       prev = next = this;
@@ -252,7 +280,7 @@ public final class GDWheelPolicy implements Policy {
     }
   }
 
-  static class Node {
+  private static class Node {
     final long key;
 
     double cost;
@@ -261,7 +289,7 @@ public final class GDWheelPolicy implements Policy {
     @Nullable Node prev;
     @Nullable Node next;
 
-    public Node(long key) {
+    public Node(long key, AccessEvent event) {
       this.key = key;
     }
 
@@ -272,7 +300,8 @@ public final class GDWheelPolicy implements Policy {
       requireNonNull(next);
       prev.next = next;
       next.prev = prev;
-      prev = next = null;
+      prev = null;
+      next = null;
     }
 
     @Override
@@ -285,7 +314,7 @@ public final class GDWheelPolicy implements Policy {
     }
   }
 
-  static final class GDWheelSettings extends BasicSettings {
+  private static final class GDWheelSettings extends BasicSettings {
     public GDWheelSettings(Config config) {
       super(config);
     }

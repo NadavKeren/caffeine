@@ -55,6 +55,13 @@ public interface Policy {
     WEIGHTED
   }
 
+  default boolean isPenaltyAware() { return false; }
+
+  /**
+   * Dumps into file the keys of the items in the cache
+   */
+  default void dump() {}
+
   /** An optional annotation to declare additional capabilities. */
   @Retention(RUNTIME)
   @Target(ElementType.TYPE)

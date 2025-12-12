@@ -22,13 +22,13 @@ import static java.util.Objects.requireNonNull;
 import java.util.LinkedHashSet;
 import java.util.function.IntConsumer;
 
-import org.jspecify.annotations.Nullable;
-
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
+import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy.PolicySpec;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.FetchStage;
 import com.google.common.base.MoreObjects;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.errorprone.annotations.Var;
@@ -36,6 +36,8 @@ import com.typesafe.config.Config;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+
+import javax.annotation.Nullable;
 
 /**
  * The Simple and Scalable caching with Static FIFO queues algorithm. This algorithm uses a
@@ -53,6 +55,7 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  *
  * @author ben.manes@gmail.com (Ben Manes)
  */
+@SuppressWarnings("NullAway")
 @PolicySpec(name = "two-queue.S3Fifo", characteristics = WEIGHTED)
 public final class S3FifoPolicy implements Policy {
   final Long2ObjectMap<Node> dataGhost;
@@ -62,6 +65,7 @@ public final class S3FifoPolicy implements Policy {
   final Node sentinelGhost;
   final Node sentinelSmall;
   final Node sentinelMain;
+  final FetchStage fetchStage;
 
   final int moveToMainThreshold;
   final int maxFrequency;
@@ -90,23 +94,49 @@ public final class S3FifoPolicy implements Policy {
     this.maxSmall = (long) (maximumSize * settings.percentSmall());
     this.maxGhost = (long) (maximumSize * settings.percentGhost());
     this.maxMain = maximumSize - maxSmall;
+
+    this.fetchStage = new FetchStage((int) Math.max(Math.min(this.maximumSize * 10, Integer.MAX_VALUE >> 10), 100000));
   }
 
   @Override
   public void record(AccessEvent event) {
+    insertArrivals(event.getRequestTime());
+
     @Var Node node;
-    if ((node = dataSmall.get(event.key())) != null) {
+    if (fetchStage.contains(event.key())) {
+      onFetchStageHit(event);
+    } else if ((node = dataSmall.get(event.key())) != null) {
       onHit(event, node, change -> sizeSmall += change);
     } else if ((node = dataMain.get(event.key())) != null) {
       onHit(event, node, change -> sizeMain += change);
     } else if (event.weight() > maximumSize) {
       policyStats.recordWeightedMiss(event.weight());
+      policyStats.recordMissPenalty(event.missPenalty());
     } else {
       policyStats.recordWeightedMiss(event.weight());
-      node = insert(event);
-      node.frequency = 0;
+      policyStats.recordMissPenalty(event.missPenalty());
+      fetchStage.insert(event);
     }
     policyStats.recordOperation();
+  }
+
+  private void insertArrivals(double timeStamp) {
+    while (fetchStage.size() > 0 && fetchStage.getClosestArrival() < timeStamp) {
+      AccessEvent arrivedEvent = fetchStage.extractClosestArrival();
+      Node node = insert(arrivedEvent);
+      node.frequency = 0;
+    }
+  }
+
+  private void onFetchStageHit(AccessEvent event) {
+    AccessEvent fetchingEvent = fetchStage.get(event.key());
+    Assert.assertCondition(fetchingEvent != null, "No fetching event found");
+
+    event.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+    event.setDelayedHitPenalty(fetchingEvent.getAvailabilityTime());
+
+    policyStats.recordWeightedDelayedHit(event.weight());
+    policyStats.recordDelayedHitPenalty(event.delayedHitPenalty());
   }
 
   private void onHit(AccessEvent event, Node node, IntConsumer sizeAdjuster) {
@@ -115,6 +145,7 @@ public final class S3FifoPolicy implements Policy {
     node.weight = event.weight();
 
     policyStats.recordWeightedHit(event.weight());
+    policyStats.recordHitPenalty(event.hitPenalty());
     while ((sizeSmall + sizeMain) > maximumSize) {
       evict();
     }
@@ -128,32 +159,36 @@ public final class S3FifoPolicy implements Policy {
     if (ghost != null) {
       ghost.remove();
       sizeGhost -= ghost.weight;
-      return insertMain(event.key(), event.weight());
+      return insertMain(event);
     } else {
-      return insertSmall(event.key(), event.weight());
+      return insertSmall(event);
     }
   }
 
   @CanIgnoreReturnValue
-  private Node insertMain(long key, int weight) {
-    var node = new Node(key, weight);
+  private Node insertMain(AccessEvent event) {
+    long key = event.key();
+    var node = new Node(key, event.weight(), event);
     node.appendAtHead(sentinelMain);
     dataMain.put(key, node);
     sizeMain += node.weight;
     return node;
   }
 
-  private Node insertSmall(long key, int weight) {
-    var node = new Node(key, weight);
+  private Node insertSmall(AccessEvent event) {
+    final long key = event.key();
+    var node = new Node(key, event.weight(), event);
     node.appendAtHead(sentinelSmall);
     dataSmall.put(key, node);
     sizeSmall += node.weight;
     return node;
   }
 
-  private void insertGhost(long key, int weight) {
+  private void insertGhost(AccessEvent event) {
     // Bound the number of non-resident entries. While not included in the paper's pseudo code, the
     // author's reference implementation adds a similar constraint to avoid uncontrolled growth.
+    final int weight = event.weight();
+    final long key = event.key();
     if (weight > maxGhost) {
       return;
     }
@@ -161,7 +196,7 @@ public final class S3FifoPolicy implements Policy {
       evictFromGhost();
     }
 
-    var node = new Node(key, weight);
+    var node = new Node(key, weight, event);
     node.appendAtHead(sentinelGhost);
     dataGhost.put(key, node);
     sizeGhost += node.weight;
@@ -181,12 +216,12 @@ public final class S3FifoPolicy implements Policy {
       var victim = requireNonNull(sentinelSmall.prev);
       policyStats.recordOperation();
       if (victim.frequency > moveToMainThreshold) {
-        insertMain(victim.key, victim.weight);
+        insertMain(victim.event);
         if (sizeMain > maxMain) {
           evictFromMain();
         }
       } else {
-        insertGhost(victim.key, victim.weight);
+        insertGhost(victim.event);
         evicted = true;
       }
       policyStats.recordEviction();
@@ -269,6 +304,7 @@ public final class S3FifoPolicy implements Policy {
 
   static final class Node {
     final long key;
+    final AccessEvent event;
 
     @Nullable Node prev;
     @Nullable Node next;
@@ -278,12 +314,14 @@ public final class S3FifoPolicy implements Policy {
 
     Node() {
       this.key = Long.MIN_VALUE;
+      this.event = null;
       this.prev = this;
       this.next = this;
     }
 
-    Node(long key, int weight) {
+    Node(long key, int weight, AccessEvent event) {
       this.key = key;
+      this.event = event;
       this.weight = weight;
     }
 

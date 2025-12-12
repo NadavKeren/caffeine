@@ -18,19 +18,21 @@ package com.github.benmanes.caffeine.cache.simulator.policy.linked;
 import static com.github.benmanes.caffeine.cache.simulator.policy.Policy.Characteristic.WEIGHTED;
 import static com.google.common.base.Preconditions.checkState;
 
-import org.jspecify.annotations.Nullable;
-
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
+import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy.PolicySpec;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.FetchStage;
 import com.google.common.base.MoreObjects;
 import com.google.errorprone.annotations.Var;
 import com.typesafe.config.Config;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+
+import javax.annotation.Nullable;
 
 /**
  * The SIEVE algorithm. This algorithm modifies the classic Clock policy (aka Second Chance) to
@@ -45,11 +47,14 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  *
  * @author ben.manes@gmail.com (Ben Manes)
  */
+@SuppressWarnings("NullAway")
 @PolicySpec(name = "linked.Sieve", characteristics = WEIGHTED)
 public final class SievePolicy implements Policy {
   final Long2ObjectMap<Node> data;
   final PolicyStats policyStats;
   final long maximumSize;
+
+  final FetchStage fetchStage;
 
   @Nullable Node head;
   @Nullable Node tail;
@@ -62,21 +67,52 @@ public final class SievePolicy implements Policy {
     this.policyStats = new PolicyStats(name());
     var settings = new BasicSettings(config);
     this.maximumSize = settings.maximumSize();
+    this.fetchStage = new FetchStage((int) Math.max(Math.min(maximumSize * 10, Integer.MAX_VALUE >> 10), 100000));
   }
 
   @Override
   public void record(AccessEvent event) {
+    insertArrivals(event.getRequestTime());
+
     policyStats.recordOperation();
-    Node node = data.get(event.key());
-    if (node == null) {
-      onMiss(event);
+    if (fetchStage.contains(event.key())){
+      onFetchStageHit(event);
     } else {
-      onHit(event, node);
+      Node node = data.get(event.key());
+      if (node == null) {
+        policyStats.recordWeightedMiss(event.weight());
+        policyStats.recordMissPenalty(event.missPenalty());
+
+        if (event.weight() < maximumSize) {
+          fetchStage.insert(event);
+        }
+      } else {
+        onHit(event, node);
+      }
     }
+  }
+
+  private void insertArrivals(double timeStamp) {
+    while (fetchStage.size() > 0 && fetchStage.getClosestArrival() < timeStamp) {
+      AccessEvent arrivedEvent = fetchStage.extractClosestArrival();
+      insert(arrivedEvent);
+    }
+  }
+
+  private void onFetchStageHit(AccessEvent event) {
+    AccessEvent fetchingEvent = fetchStage.get(event.key());
+    Assert.assertCondition(fetchingEvent != null, "No fetching event found");
+
+    event.changeEventStatus(AccessEvent.EventStatus.DELAYED_HIT);
+    event.setDelayedHitPenalty(fetchingEvent.getAvailabilityTime());
+
+    policyStats.recordWeightedDelayedHit(event.weight());
+    policyStats.recordDelayedHitPenalty(event.delayedHitPenalty());
   }
 
   private void onHit(AccessEvent event, Node node) {
     policyStats.recordWeightedHit(event.weight());
+    policyStats.recordHitPenalty(event.hitPenalty());
     size += (event.weight() - node.weight);
     node.weight = event.weight();
     node.visited = true;
@@ -86,15 +122,10 @@ public final class SievePolicy implements Policy {
     }
   }
 
-  private void onMiss(AccessEvent event) {
-    if (event.weight() > maximumSize) {
-      policyStats.recordWeightedMiss(event.weight());
-      return;
-    }
+  private void insert(AccessEvent event) {
     while ((size + event.weight()) >= maximumSize) {
       evict();
     }
-    policyStats.recordWeightedMiss(event.weight());
     var node = new Node(event.key(), event.weight());
     data.put(event.key(), node);
     size += event.weight();
