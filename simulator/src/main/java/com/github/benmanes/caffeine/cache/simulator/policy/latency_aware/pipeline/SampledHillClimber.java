@@ -109,7 +109,6 @@ public class SampledHillClimber implements Policy {
             int res = event.getStatus() == AccessEvent.EventStatus.MISS ? 0 : 1;
             resultsDump.println(event.getRequestTime()
                                 + " " + event.key()
-                                + " " + event.hitPenalty()
                                 + " " + event.missPenalty()
                                 + " " + res);
         }
@@ -245,6 +244,7 @@ public class SampledHillClimber implements Policy {
         public int adaptionMultiplier() { return config().getInt(BASE_PATH + ".adaption-multiplier"); }
     }
 
+    @SuppressWarnings("this-escape")
     public static class SHCStats extends PolicyStats {
         private long sampledRequests = 0;
         public SHCStats(String format, int sampleOrder, Object... args) {

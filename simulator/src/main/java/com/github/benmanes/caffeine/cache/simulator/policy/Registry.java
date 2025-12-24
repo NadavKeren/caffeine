@@ -46,6 +46,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.irr.FrdPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.irr.HillClimberFrdPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.irr.IndicatorFrdPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.irr.LirsPolicy;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.MockupLAPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.YanLi;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.PipelinePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.SampledHillClimber;
@@ -133,6 +134,7 @@ public final class Registry {
     register(YanLi.class, YanLi::new);
     register(PipelinePolicy.class, PipelinePolicy::policy);
     register(SampledHillClimber.class, SampledHillClimber::new);
+    register(MockupLAPolicy.class, MockupLAPolicy::new);
   }
 
   /** Registers the policy based on the annotated name. */

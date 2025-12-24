@@ -46,6 +46,7 @@ import com.google.errorprone.annotations.CanIgnoreReturnValue;
  *
  * @author ben.manes@gmail.com (Ben Manes)
  */
+@SuppressWarnings("this-escape")
 public class PolicyStats {
   private final Map<String, Metric> metrics;
   private final Stopwatch stopwatch;
