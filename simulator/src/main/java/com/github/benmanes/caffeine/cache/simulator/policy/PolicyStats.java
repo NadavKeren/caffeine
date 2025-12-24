@@ -101,8 +101,10 @@ public class PolicyStats {
         .name("Weighted Miss Rate").value(this::weightedMissRate)
         .type(PERCENT).characteristic(WEIGHTED));
     addPercentMetric("Adaption", this::percentAdaption);
-    addMetric("Average Miss Penalty", this::averageMissPenalty);
-    addMetric("Average Penalty", this::averagePenalty);
+    addMetric(new Metric.Builder().name("Average Miss Penalty")
+      .value(this::averageMissPenalty).type(NUMBER).required(true));
+    addMetric(new Metric.Builder().name("Average Penalty")
+      .value(this::averagePenalty).type(NUMBER).required(true));
     addMetric("Steps", this::operationCount);
     addMetric("Time", this::stopwatch);
   }
