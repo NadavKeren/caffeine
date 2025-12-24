@@ -21,8 +21,10 @@ import java.util.ArrayList;
 @SuppressWarnings("NullAway")
 @Policy.PolicySpec(name = "latency-aware.SampledHillClimber")
 public class SampledHillClimber implements Policy {
-    private final static boolean DUMP = true;
+    private final static boolean DUMP_STATES = true;
+    private final static boolean DUMP_RESULTS = true;
     @Nullable private PrintWriter quotaDump = null;
+    @Nullable private PrintWriter resultsDump = null;
 
     private final PipelinePolicy mainPipeline;
     private final LongSampler sampler;
@@ -51,9 +53,12 @@ public class SampledHillClimber implements Policy {
 
         createGhostCaches();
 
-        if (DUMP) {
-            prepareQuotaDump();
+        if (DUMP_STATES) {
+            quotaDump = prepareDump("quota_dump");
             quotaDump.println(printFormatState(0, this.mainPipeline.getCurrentState().quotas, 0, new double[ghostCaches.size()]));
+        }
+        if (DUMP_RESULTS) {
+          resultsDump = prepareDump("results_dump");
         }
     }
 
@@ -98,6 +103,15 @@ public class SampledHillClimber implements Policy {
                 break;
             default:
                 throw new IllegalStateException("No such event status");
+        }
+
+        if (resultsDump != null) {
+            int res = event.getStatus() == AccessEvent.EventStatus.MISS ? 0 : 1;
+            resultsDump.println(event.getRequestTime()
+                                + " " + event.key()
+                                + " " + event.hitPenalty()
+                                + " " + event.missPenalty()
+                                + " " + res);
         }
 
         if (sampler.shouldSample(event.key())) {
@@ -161,7 +175,7 @@ public class SampledHillClimber implements Policy {
             createGhostCaches();
         }
 
-        if (DUMP && quotaDump != null) {
+        if (DUMP_STATES && quotaDump != null) {
             quotaDump.println(printFormatState(eventNum, this.mainPipeline.getCurrentState().quotas, currentAvg, timeframeResults));
             quotaDump.flush();
         }
@@ -197,22 +211,25 @@ public class SampledHillClimber implements Policy {
         return stats;
     }
 
-    private void prepareQuotaDump() {
+    private PrintWriter prepareDump(String suffix) {
         String currentDir = System.getProperty("user.dir");
+        PrintWriter dump = null;
         try {
-            FileWriter fwriter = new FileWriter(currentDir + "/SHC-O" + sampleOrder + ".quota-dump", StandardCharsets.UTF_8);
-            quotaDump = new PrintWriter(fwriter);
+            FileWriter fwriter = new FileWriter(currentDir + "/SHC-O" + sampleOrder + "." + suffix, StandardCharsets.UTF_8);
+            dump = new PrintWriter(fwriter);
         } catch (IOException e) {
             System.err.println("Error creating the log file handler");
             //noinspection CallToPrintStackTrace
             e.printStackTrace();
             System.exit(1);
         }
+
+        return dump;
     }
 
     @Override
     public void dump() {
-        if (DUMP && quotaDump != null) {
+        if (DUMP_STATES && quotaDump != null) {
             quotaDump.close();
         }
     }
