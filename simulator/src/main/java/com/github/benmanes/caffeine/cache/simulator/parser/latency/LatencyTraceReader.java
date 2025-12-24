@@ -23,10 +23,9 @@ import java.math.BigInteger;
 import java.util.stream.Stream;
 
 /**
- * A reader for the trace files of mp-trace-maker. Traces & format can be found at: git repo
- * address
+ * A reader for the trace files of the format: timestamp key miss_penalty.
  *
- * @author himelbrand@gmail.com (Omri Himelbrand)
+ * @author nadavker-bgu@pm.me (Nadav Keren)
  */
 public final class LatencyTraceReader extends TextTraceReader {
   private final static BigInteger MAX_LONG = new BigInteger(Long.toString(Long.MAX_VALUE));
@@ -53,8 +52,8 @@ public final class LatencyTraceReader extends TextTraceReader {
             split ->
                 AccessEvent.forKeyPenaltiesAndArrivalTime(
                     parseKey(split[1]),
+                    0,
                     Double.parseDouble(split[2]),
-                    Double.parseDouble(split[3]),
                     Double.parseDouble(split[0])));
   }
 }
