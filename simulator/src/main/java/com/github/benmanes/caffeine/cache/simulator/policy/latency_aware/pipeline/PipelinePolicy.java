@@ -130,6 +130,9 @@ public class PipelinePolicy implements Policy {
             quota[idx] = currQuota;
         }
 
+        final int quantaSum = Arrays.stream(quota).sum();
+        Assert.assertCondition(quantaSum == totalQuanta, () -> String.format("Bad quota initialization, total quanta should be %d, got %d instead", totalQuanta, quantaSum));
+
         stats = new PolicyStats(generatePipelineName());
         timeframeStats = new TimeframeStats();
 
