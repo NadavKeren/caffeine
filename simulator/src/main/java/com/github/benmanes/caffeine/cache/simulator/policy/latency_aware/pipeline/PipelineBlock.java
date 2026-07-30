@@ -1,5 +1,6 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline;
 
+import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 
 import javax.annotation.Nullable;
@@ -26,7 +27,7 @@ public interface PipelineBlock {
 
     void validate();
 
-    default void bookkeeping(long key) {}
+    default void bookkeeping(AccessEvent event) {}
 
     void clear();
 

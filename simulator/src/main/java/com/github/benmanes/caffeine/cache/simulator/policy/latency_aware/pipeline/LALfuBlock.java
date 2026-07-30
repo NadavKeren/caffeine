@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
 import com.github.benmanes.caffeine.cache.simulator.admission.LATinyLfu;
 import com.github.benmanes.caffeine.cache.simulator.admission.UneditableAdmittorProxy;
+import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
@@ -179,8 +180,10 @@ public class LALfuBlock implements PipelineBlock {
     }
 
     @Override
-    public void bookkeeping(long key) {
-        admittor.record(key);
+    public void bookkeeping(AccessEvent event) {
+        admittor.record(event.key());
+        probationBlock.updateEventNumber(event.eventNum());
+        protectedBlock.updateEventNumber(event.eventNum());
     }
 
     @Override

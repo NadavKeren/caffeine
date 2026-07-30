@@ -4,12 +4,14 @@ import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.admission.Admittor;
 import com.github.benmanes.caffeine.cache.simulator.admission.TinyLfu;
 import com.github.benmanes.caffeine.cache.simulator.admission.UneditableAdmittorProxy;
+import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.google.common.base.MoreObjects;
 import com.typesafe.config.Config;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import net.openhft.hashing.Access;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -297,8 +299,8 @@ public class LfuBlock implements PipelineBlock {
     }
 
     @Override
-    public void bookkeeping(long key) {
-        admittor.record(key);
+    public void bookkeeping(AccessEvent event) {
+        admittor.record(event.key());
     }
 
     @Override

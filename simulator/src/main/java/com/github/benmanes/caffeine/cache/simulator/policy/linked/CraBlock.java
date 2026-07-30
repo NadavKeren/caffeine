@@ -56,7 +56,7 @@ public final class CraBlock {
     private double normalizationFactor;
     private final double decayFactor;
     private final int maxLists;
-    private int currOp;
+    private long currEventNum;
     private final LatencyEstimator latencyEstimator;
     final private String name;
 
@@ -75,7 +75,7 @@ public final class CraBlock {
 
         this.decayFactor = decayFactor;
         this.maxLists = maxLists;
-        this.currOp = 1;
+        this.currEventNum = 0;
         this.latencyEstimator = latencyEstimator;
         this.name = name;
     }
@@ -94,7 +94,7 @@ public final class CraBlock {
         this.size = 0;
 
         this.decayFactor = other.decayFactor;
-        this.currOp = other.currOp;
+        this.currEventNum = other.currEventNum;
         this.latencyEstimator = new UneditableLatencyEstimatorProxy(other.latencyEstimator);
         this.name = name;
 
@@ -118,7 +118,7 @@ public final class CraBlock {
     public void copyInto(CraBlock other) {
         other.maximumSize = this.maximumSize;
         other.size = 0;
-        other.currOp = this.currOp;
+        other.currEventNum = this.currEventNum;
         other.copyLists(this);
     }
 
@@ -253,6 +253,11 @@ public final class CraBlock {
         this.normalizationFactor = normalizationFactor;
     }
 
+    public void updateEventNumber(long newEventNum) {
+        Assert.assertCondition(this.currEventNum <= newEventNum, () -> String.format("Wrong time update: original %d, new: %d", this.currEventNum, newEventNum));
+        this.currEventNum = newEventNum;
+    }
+
     private int findList(long key) {
         int listNum = 0;
         double delta = latencyEstimator.getDelta(key);
@@ -269,9 +274,9 @@ public final class CraBlock {
         Node newNode = getNode(entry, inSentinel);
 
         data.put(entry.key(), newNode);
-        newNode.appendToTail();
         assert newNode.data != null;
-        newNode.data.recordOperation(currOp++);
+
+        newNode.insertByEventNum();
 
         ++size;
     }
@@ -333,7 +338,7 @@ public final class CraBlock {
             if (currScore < minScore
                 || victim == null
                 || (currScore == minScore
-                    && (double) currVictim.data.lastOpNum() / currOp < (double) victim.data.lastOpNum() / currOp)) {
+                    && currVictim.data.lastOpNum() < victim.data.lastOpNum())) {
                 minScore = currScore;
                 victim = currVictim;
             }
@@ -355,7 +360,11 @@ public final class CraBlock {
     private double score(Node node) {
         assert node.data != null;
         final double delta = latencyEstimator.getDelta(node.key());
-        final long numOfOpsSinceModified = currOp - node.data.lastOpNum(); // For all nodes lastOpNum < currOp
+        final long numOfOpsSinceModified = currEventNum - node.data.lastOpNum();
+        Assert.assertCondition(numOfOpsSinceModified >= 0,
+                               () -> String.format("currentEventNum: %d, node last op: %d",
+                                                   currEventNum,
+                                                   node.data.lastOpNum()));
         final double numericalRecencyScore = Math.pow((double) numOfOpsSinceModified, -decayFactor);
 
         return Math.signum(delta) * Math.pow(Math.abs(delta), numericalRecencyScore);
@@ -484,6 +493,21 @@ public final class CraBlock {
             head.prev = this;
             next = head;
             prev = sentinel;
+            ++sentinel.size;
+        }
+
+        public void insertByEventNum() {
+            assert data != null;
+            long myEventNum = data.lastOpNum();
+            Node curr = sentinel.prev; // start at tail (MRU end)
+            while (curr != sentinel && curr.data.lastOpNum() > myEventNum) {
+                curr = curr.prev;
+            }
+            Node successor = curr.next;
+            curr.next = this;
+            this.prev = curr;
+            this.next = successor;
+            successor.prev = this;
             ++sentinel.size;
         }
 

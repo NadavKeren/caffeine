@@ -316,12 +316,12 @@ public class PipelinePolicy implements Policy {
             onHitAtFetchStage(fetchingStage.get(event.key()), event);
 
             for (PipelineBlock block : blocks) {
-                block.bookkeeping(event.key());
+                block.bookkeeping(event);
             }
         } else {
             for (PipelineBlock block : blocks) {
                 // Not stopping after item is found in order to let all blocks perform bookkeeping
-                block.bookkeeping(event.key());
+                block.bookkeeping(event);
 
                 if (entry == null) {
                     entry = block.getEntry(event.key());

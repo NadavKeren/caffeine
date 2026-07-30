@@ -2,6 +2,7 @@ package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeli
 
 import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
 import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
+import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock;
@@ -99,8 +100,9 @@ public class LALruBlock implements PipelineBlock {
     }
 
     @Override
-    public void bookkeeping(long key) {
-        updateNormalization(key);
+    public void bookkeeping(AccessEvent event) {
+        updateNormalization(event.key());
+        block.updateEventNumber(event.eventNum());
     }
 
     @Nullable
@@ -118,7 +120,7 @@ public class LALruBlock implements PipelineBlock {
         return victim;
     }
 
-    public void updateNormalization(long key) {
+    private void updateNormalization(long key) {
         double delta = latencyEstimator.getDelta(key);
 
         if (delta > normalizationFactor) {
