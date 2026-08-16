@@ -21,7 +21,9 @@ import java.io.PrintWriter;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /***
  * This class represents a static configuration pipeline,
@@ -305,6 +307,8 @@ public class PipelinePolicy implements Policy {
             return;
         }
 
+        this.timeframeStats.recordRequest(event.key());
+
         insertArrivals(event.getRequestTime());
         EntryData entry = null;
 
@@ -319,12 +323,17 @@ public class PipelinePolicy implements Policy {
                 block.bookkeeping(event.key());
             }
         } else {
-            for (PipelineBlock block : blocks) {
+            int hitBlockIdx = -1;
+            for (int idx = 0; idx < blockCount; ++idx) {
+                PipelineBlock block = blocks[idx];
                 // Not stopping after item is found in order to let all blocks perform bookkeeping
                 block.bookkeeping(event.key());
 
                 if (entry == null) {
                     entry = block.getEntry(event.key());
+                    if (entry != null) {
+                        hitBlockIdx = idx;
+                    }
                 }
 
                 if (DEBUG && opDumpWriter != null && dumper != null && entry != null) {
@@ -336,7 +345,7 @@ public class PipelinePolicy implements Policy {
             if (entry == null) {
                 onMiss(event);
             } else {
-                onCacheHit(entry, event);
+                onCacheHit(entry, event, hitBlockIdx);
             }
         }
 
@@ -379,7 +388,8 @@ public class PipelinePolicy implements Policy {
 
         final int totalSizeBeforeInsertion = Arrays.stream(blocks).mapToInt(PipelineBlock::size).sum();
 
-        for (PipelineBlock block : blocks) {
+        for (int idx = 0; idx < blockCount; ++idx) {
+            PipelineBlock block = blocks[idx];
             if (newItem != null) {
                 if (dumper != null) {
                     dumper.print(eventNum + "\t"
@@ -388,6 +398,9 @@ public class PipelinePolicy implements Policy {
                 }
 
                 newItem = block.insert(newItem);
+                if (newItem != null) {
+                    this.timeframeStats.recordBlockEviction(idx);
+                }
 
                 if (DEBUG) {
                     debugPrint(block.type(), newItem, eventNum);
@@ -402,6 +415,7 @@ public class PipelinePolicy implements Policy {
 
         if (newItem != null) {
             stats.recordEviction();
+            this.timeframeStats.recordEviction();
             latencyEstimator.remove(newItem.key());
             burstEstimator.remove(newItem.key());
 
@@ -426,7 +440,7 @@ public class PipelinePolicy implements Policy {
         dumper.println(eventNum + ":\t" + ConsoleColors.colorString(blockType + " -> ", ConsoleColors.YELLOW) + itemStr);
     }
 
-    private void onCacheHit(EntryData entry, AccessEvent currEvent) {
+    private void onCacheHit(EntryData entry, AccessEvent currEvent, int blockIdx) {
         boolean isAvailable = entry.event().isAvailableAt(currEvent.getRequestTime());
         Assert.assertCondition(isAvailable, "Should not consider an non-available event as cache hit");
 
@@ -438,7 +452,7 @@ public class PipelinePolicy implements Policy {
         latencyEstimator.recordHit(currEvent.hitPenalty());
         burstEstimator.recordHit(currEvent.hitPenalty());
 
-        this.timeframeStats.recordHit(currEvent.hitPenalty());
+        this.timeframeStats.recordHit(currEvent.hitPenalty(), blockIdx, entry.event().missPenalty());
     }
 
     private void onHitAtFetchStage(AccessEvent fetchEvent, AccessEvent pendingEvent) {
@@ -470,6 +484,34 @@ public class PipelinePolicy implements Policy {
         return this.timeframeStats.getStats();
     }
 
+    public int getTimeframeUniqueCount() {
+        return this.timeframeStats.uniqueRequestCount();
+    }
+
+    public int getTimeframeHitCount() {
+        return this.timeframeStats.getHitCount();
+    }
+
+    public int getTimeframeEvictionCount() {
+        return this.timeframeStats.getEvictionCount();
+    }
+
+    public int[] getTimeframeHitsPerBlock() {
+        return this.timeframeStats.getHitsPerBlock();
+    }
+
+    public int[] getTimeframeEvictionsPerBlock() {
+        return this.timeframeStats.getEvictionsPerBlock();
+    }
+
+    public double getTimeframeSavedLatency() {
+        return this.timeframeStats.getSavedLatency();
+    }
+
+    public double[] getTimeframeSavedLatencyPerBlock() {
+        return this.timeframeStats.getSavedLatencyPerBlock();
+    }
+
     public void moveQuantum(int incIdx, int decIdx) {
         Assert.assertCondition(incIdx != decIdx, "should not perform move into the same block");
 
@@ -482,6 +524,33 @@ public class PipelinePolicy implements Policy {
 
         ++quota[incIdx];
         --quota[decIdx];
+    }
+
+    public void reorderTo(BlockType[] targetOrder) {
+        Assert.assertCondition(targetOrder.length == blockCount,
+                               () -> String.format("Target order size %d does not match block count %d", targetOrder.length, blockCount));
+
+        PipelineBlock[] reorderedBlocks = new PipelineBlock[blockCount];
+        int[] reorderedQuota = new int[blockCount];
+
+        for (int idx = 0; idx < blockCount; ++idx) {
+            int sourceIdx = indexOfType(targetOrder[idx]);
+            reorderedBlocks[idx] = blocks[sourceIdx];
+            reorderedQuota[idx] = quota[sourceIdx];
+        }
+
+        System.arraycopy(reorderedBlocks, 0, blocks, 0, blockCount);
+        System.arraycopy(reorderedQuota, 0, quota, 0, blockCount);
+    }
+
+    private int indexOfType(BlockType type) {
+        for (int idx = 0; idx < blockCount; ++idx) {
+            if (blocks[idx].type() == type) {
+                return idx;
+            }
+        }
+
+        throw new IllegalStateException("No block of type: " + type);
     }
 
     public void makeDummy() {
@@ -633,6 +702,11 @@ public class PipelinePolicy implements Policy {
         }
 
         @Override
+        public void reorderTo(BlockType[] targetOrder) {
+            // Not doing anything
+        }
+
+        @Override
         public boolean canExtend(int idx) {
             return false;
         }
@@ -647,11 +721,24 @@ public class PipelinePolicy implements Policy {
         private int hitCount = 0;
         private int delayedCount = 0;
         private int missCount = 0;
+        private int evictionCount = 0;
         private double penalty = 0d;
+        private double savedLatency = 0d;
+        private final Set<Long> uniqueKeys = new HashSet<>();
+        private final int[] hitsPerBlock = new int[blockCount];
+        private final int[] evictionsPerBlock = new int[blockCount];
+        private final double[] savedLatencyPerBlock = new double[blockCount];
 
-        public void recordHit(double penalty) {
+        public void recordRequest(long key) {
+            uniqueKeys.add(key);
+        }
+
+        public void recordHit(double penalty, int blockIdx, double latencySaved) {
             hitCount++;
             this.penalty += penalty;
+            hitsPerBlock[blockIdx]++;
+            savedLatency += latencySaved;
+            savedLatencyPerBlock[blockIdx] += latencySaved;
         }
 
         public void recordMiss(double penalty) {
@@ -664,11 +751,53 @@ public class PipelinePolicy implements Policy {
             this.penalty += penalty;
         }
 
+        public void recordEviction() {
+            evictionCount++;
+        }
+
+        public void recordBlockEviction(int blockIdx) {
+            evictionsPerBlock[blockIdx]++;
+        }
+
+        public int uniqueRequestCount() {
+            return uniqueKeys.size();
+        }
+
+        public int getHitCount() {
+            return hitCount;
+        }
+
+        public int getEvictionCount() {
+            return evictionCount;
+        }
+
+        public int[] getHitsPerBlock() {
+            return Arrays.copyOf(hitsPerBlock, hitsPerBlock.length);
+        }
+
+        public int[] getEvictionsPerBlock() {
+            return Arrays.copyOf(evictionsPerBlock, evictionsPerBlock.length);
+        }
+
+        public double getSavedLatency() {
+            return savedLatency;
+        }
+
+        public double[] getSavedLatencyPerBlock() {
+            return Arrays.copyOf(savedLatencyPerBlock, savedLatencyPerBlock.length);
+        }
+
         public void clear() {
             hitCount = 0;
             delayedCount = 0;
             missCount = 0;
+            evictionCount = 0;
             penalty = 0d;
+            savedLatency = 0d;
+            uniqueKeys.clear();
+            Arrays.fill(hitsPerBlock, 0);
+            Arrays.fill(evictionsPerBlock, 0);
+            Arrays.fill(savedLatencyPerBlock, 0d);
         }
 
         public String getStats() {

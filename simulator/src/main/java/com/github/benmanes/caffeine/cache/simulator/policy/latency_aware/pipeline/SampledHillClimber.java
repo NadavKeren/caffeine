@@ -55,7 +55,8 @@ public class SampledHillClimber implements Policy {
 
         if (DUMP_STATES) {
             quotaDump = prepareDump("quota_dump");
-            quotaDump.println(printFormatState(0, this.mainPipeline.getCurrentState().quotas, 0, new double[ghostCaches.size()]));
+            quotaDump.println(buildHeaderRow());
+            quotaDump.println(printFormatState(0, this.mainPipeline.getCurrentState().quotas, emptySnapshot(), emptySnapshots()));
         }
         if (DUMP_RESULTS) {
           resultsDump = prepareDump("results_dump");
@@ -135,12 +136,21 @@ public class SampledHillClimber implements Policy {
     private void adapt(int eventNum) {
         final double currentAvg = this.mainPipeline.getTimeframeAveragePenalty();
 
+        GhostStatsSnapshot mainSnapshot = new GhostStatsSnapshot(currentAvg,
+                                                                  this.mainPipeline.getTimeframeUniqueCount(),
+                                                                  this.mainPipeline.getTimeframeHitCount(),
+                                                                  this.mainPipeline.getTimeframeEvictionCount(),
+                                                                  this.mainPipeline.getTimeframeSavedLatency(),
+                                                                  this.mainPipeline.getTimeframeHitsPerBlock(),
+                                                                  this.mainPipeline.getTimeframeEvictionsPerBlock(),
+                                                                  this.mainPipeline.getTimeframeSavedLatencyPerBlock());
+
         this.mainPipeline.resetTimeframeStats();
 
         double minAvg = currentAvg;
         int minIdx = -1;
 
-        double[] timeframeResults = new double[this.ghostCaches.size()];
+        GhostStatsSnapshot[] snapshots = new GhostStatsSnapshot[this.ghostCaches.size()];
         for (int idx = 0; idx < this.ghostCaches.size(); ++idx) {
             var currGhostCache = this.ghostCaches.get(idx).first();
             double currGhostAvg = currGhostCache.getTimeframeAveragePenalty();
@@ -148,7 +158,19 @@ public class SampledHillClimber implements Policy {
                 minAvg = currGhostAvg;
                 minIdx = idx;
             }
-            timeframeResults[idx] = currGhostAvg < Double.MAX_VALUE ? currGhostAvg : -1;
+
+            boolean isValid = currGhostAvg < Double.MAX_VALUE;
+            snapshots[idx] = isValid
+                ? new GhostStatsSnapshot(currGhostAvg,
+                                         currGhostCache.getTimeframeUniqueCount(),
+                                         currGhostCache.getTimeframeHitCount(),
+                                         currGhostCache.getTimeframeEvictionCount(),
+                                         currGhostCache.getTimeframeSavedLatency(),
+                                         currGhostCache.getTimeframeHitsPerBlock(),
+                                         currGhostCache.getTimeframeEvictionsPerBlock(),
+                                         currGhostCache.getTimeframeSavedLatencyPerBlock())
+                : GhostStatsSnapshot.na();
+
             currGhostCache.resetTimeframeStats();
         }
 
@@ -175,34 +197,106 @@ public class SampledHillClimber implements Policy {
         }
 
         if (DUMP_STATES && quotaDump != null) {
-            quotaDump.println(printFormatState(eventNum, this.mainPipeline.getCurrentState().quotas, currentAvg, timeframeResults));
+            quotaDump.println(printFormatState(eventNum, this.mainPipeline.getCurrentState().quotas, mainSnapshot, snapshots));
             quotaDump.flush();
         }
 
     }
 
-    private String printFormatState(int eventNum, int[] quotas, double avgPen, double[] ghostResults) {
+    private String buildHeaderRow() {
         StringBuilder sb = new StringBuilder();
 
-        sb.append(eventNum);
-        sb.append(',');
+        sb.append("event_num");
 
-        for (int quota : quotas) {
-            sb.append(quota);
-            sb.append(',');
+        for (int idx = 0; idx < blockCount; ++idx) {
+            sb.append(",quota_").append(idx);
         }
 
-        sb.append(String.format("%.2f", avgPen));
-        for (double res : ghostResults) {
-            sb.append(',');
-            if (res >= 0) {
-                sb.append(String.format("%.2f", res));
-            } else {
-                sb.append("NA");
-            }
+        appendSnapshotHeader(sb, "main");
+
+        for (var pair : ghostCaches) {
+            CacheDiff diff = pair.right();
+            String prefix = "ghost_i" + diff.incIdx + "_d" + diff.decIdx;
+            appendSnapshotHeader(sb, prefix);
         }
 
         return sb.toString();
+    }
+
+    private void appendSnapshotHeader(StringBuilder sb, String prefix) {
+        sb.append(',').append(prefix).append("_avg_penalty");
+        sb.append(',').append(prefix).append("_unique_requests");
+        sb.append(',').append(prefix).append("_hits");
+        sb.append(',').append(prefix).append("_evictions");
+        sb.append(',').append(prefix).append("_saved_latency");
+
+        for (int b = 0; b < blockCount; ++b) {
+            sb.append(',').append(prefix).append("_hits_block").append(b);
+        }
+        for (int b = 0; b < blockCount; ++b) {
+            sb.append(',').append(prefix).append("_evictions_block").append(b);
+        }
+        for (int b = 0; b < blockCount; ++b) {
+            sb.append(',').append(prefix).append("_saved_latency_block").append(b);
+        }
+    }
+
+    private GhostStatsSnapshot emptySnapshot() {
+        return new GhostStatsSnapshot(0, 0, 0, 0, 0, new int[blockCount], new int[blockCount], new double[blockCount]);
+    }
+
+    private GhostStatsSnapshot[] emptySnapshots() {
+        GhostStatsSnapshot[] snapshots = new GhostStatsSnapshot[ghostCaches.size()];
+        for (int idx = 0; idx < snapshots.length; ++idx) {
+            snapshots[idx] = emptySnapshot();
+        }
+        return snapshots;
+    }
+
+    private String printFormatState(int eventNum, int[] quotas, GhostStatsSnapshot mainSnapshot, GhostStatsSnapshot[] snapshots) {
+        StringBuilder sb = new StringBuilder();
+
+        sb.append(eventNum);
+
+        for (int quota : quotas) {
+            sb.append(',');
+            sb.append(quota);
+        }
+
+        appendSnapshot(sb, mainSnapshot);
+
+        for (GhostStatsSnapshot snapshot : snapshots) {
+            appendSnapshot(sb, snapshot);
+        }
+
+        return sb.toString();
+    }
+
+    private void appendSnapshot(StringBuilder sb, GhostStatsSnapshot snapshot) {
+        sb.append(',');
+        if (snapshot.avgPenalty >= 0) {
+            sb.append(String.format("%.2f", snapshot.avgPenalty));
+        } else {
+            sb.append("NA");
+        }
+
+        sb.append(',').append(snapshot.uniqueRequests >= 0 ? String.valueOf(snapshot.uniqueRequests) : "NA");
+        sb.append(',').append(snapshot.hits >= 0 ? String.valueOf(snapshot.hits) : "NA");
+        sb.append(',').append(snapshot.evictions >= 0 ? String.valueOf(snapshot.evictions) : "NA");
+        sb.append(',').append(snapshot.savedLatency >= 0 ? String.format("%.2f", snapshot.savedLatency) : "NA");
+
+        for (int b = 0; b < blockCount; ++b) {
+            sb.append(',');
+            sb.append(snapshot.hitsPerBlock != null ? String.valueOf(snapshot.hitsPerBlock[b]) : "NA");
+        }
+        for (int b = 0; b < blockCount; ++b) {
+            sb.append(',');
+            sb.append(snapshot.evictionsPerBlock != null ? String.valueOf(snapshot.evictionsPerBlock[b]) : "NA");
+        }
+        for (int b = 0; b < blockCount; ++b) {
+            sb.append(',');
+            sb.append(snapshot.savedLatencyPerBlock != null ? String.format("%.2f", snapshot.savedLatencyPerBlock[b]) : "NA");
+        }
     }
 
     @Override
@@ -265,6 +359,34 @@ public class SampledHillClimber implements Policy {
 
         public double samplingPercentage() {
             return this.requestCount() > 0 ? (double) sampledRequests / this.requestCount() : 1d;
+        }
+    }
+
+    private static class GhostStatsSnapshot {
+        final double avgPenalty;
+        final int uniqueRequests;
+        final int hits;
+        final int evictions;
+        final double savedLatency;
+        @Nullable final int[] hitsPerBlock;
+        @Nullable final int[] evictionsPerBlock;
+        @Nullable final double[] savedLatencyPerBlock;
+
+        GhostStatsSnapshot(double avgPenalty, int uniqueRequests, int hits, int evictions, double savedLatency,
+                           @Nullable int[] hitsPerBlock, @Nullable int[] evictionsPerBlock,
+                           @Nullable double[] savedLatencyPerBlock) {
+            this.avgPenalty = avgPenalty;
+            this.uniqueRequests = uniqueRequests;
+            this.hits = hits;
+            this.evictions = evictions;
+            this.savedLatency = savedLatency;
+            this.hitsPerBlock = hitsPerBlock;
+            this.evictionsPerBlock = evictionsPerBlock;
+            this.savedLatencyPerBlock = savedLatencyPerBlock;
+        }
+
+        static GhostStatsSnapshot na() {
+            return new GhostStatsSnapshot(-1, -1, -1, -1, -1, null, null, null);
         }
     }
 
