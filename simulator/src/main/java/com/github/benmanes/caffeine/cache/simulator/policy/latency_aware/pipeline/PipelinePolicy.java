@@ -58,6 +58,11 @@ public class PipelinePolicy implements Policy {
     @Nullable private PrintWriter dumper = null;
     @Nullable private PrintWriter opDumpWriter = null;
 
+    private boolean standaloneLoggingEnabled = false;
+    private int opsSinceLog = 0;
+    final private int logTimeframe;
+    @Nullable private PrintWriter avgPenaltyDump = null;
+
     /*
      * TODO: nkeren: consult Ben regarding how to share these with only one party making the updates.
      */
@@ -79,6 +84,7 @@ public class PipelinePolicy implements Policy {
         this.isDummy = true;
         this.isCopy = true;
         this.timeframeStats = new TimeframeStats();
+        this.logTimeframe = 0;
     }
 
     /***
@@ -104,6 +110,7 @@ public class PipelinePolicy implements Policy {
         quantumSize = settings.quantumSize() >> shrinkOrder;
         Assert.assertCondition(quantumSize > 0, () -> String.format("The sampling order is too high: %d", shrinkOrder));
         cacheCapacity = totalQuanta * quantumSize;
+        logTimeframe = settings.logTimeframeMultiplier() * cacheCapacity;
 
         fetchingStage = new FetchStage(Math.max(100000, cacheCapacity));
 
@@ -157,7 +164,30 @@ public class PipelinePolicy implements Policy {
     }
 
     public static Policy policy(Config config) {
-         return new PipelinePolicy(config);
+         PipelinePolicy policy = new PipelinePolicy(config);
+         policy.enableStandaloneLogging();
+         return policy;
+    }
+
+    /***
+     * Enables the periodic average-penalty dump, meant for when this pipeline is run
+     * as a standalone policy (as opposed to being driven by an adaptive wrapper such as
+     * the SampledHillClimber, which performs its own, richer, dumping).
+     */
+    private void enableStandaloneLogging() {
+        standaloneLoggingEnabled = true;
+        try {
+            String currentDir = System.getProperty("user.dir");
+            FileWriter fwriter = new FileWriter(currentDir + "/Pipeline.avg_penalty_dump", Charset.defaultCharset());
+            avgPenaltyDump = new PrintWriter(fwriter);
+        } catch (IOException e) {
+            System.err.println("Error creating the log file handler");
+            //noinspection CallToPrintStackTrace
+            e.printStackTrace();
+            System.exit(1);
+        }
+
+        avgPenaltyDump.println("event_num,avg_penalty");
     }
 
     public void clear() {
@@ -266,6 +296,7 @@ public class PipelinePolicy implements Policy {
         this.timeframeStats = new TimeframeStats();
         this.dumper = null;
         this.opDumpWriter = null;
+        this.logTimeframe = 0;
 
         this.fetchingStage = new FetchStage(source.fetchingStage);
         this.isDummy = false;
@@ -354,6 +385,17 @@ public class PipelinePolicy implements Policy {
             latencyEstimator.ageAll();
             burstEstimator.ageAll();
             opsSinceLastAging = 0;
+        }
+
+        if (standaloneLoggingEnabled) {
+            ++opsSinceLog;
+            if (opsSinceLog >= logTimeframe) {
+                opsSinceLog = 0;
+                double avgPenalty = getTimeframeAveragePenalty();
+                resetTimeframeStats();
+                avgPenaltyDump.println(event.eventNum() + "," + String.format("%.2f", avgPenalty));
+                avgPenaltyDump.flush();
+            }
         }
     }
 
@@ -567,6 +609,11 @@ public class PipelinePolicy implements Policy {
             opDumpWriter.flush();
             opDumpWriter.close();
         }
+
+        if (avgPenaltyDump != null) {
+            avgPenaltyDump.flush();
+            avgPenaltyDump.close();
+        }
     }
 
     public int[] getQuota() {
@@ -629,6 +676,8 @@ public class PipelinePolicy implements Policy {
         public int numOfQuanta() { return config().getInt(BASE_PATH + ".num-of-quanta"); }
 
         public int quantumSize() { return config().getInt(BASE_PATH + ".quantum-size"); }
+
+        public int logTimeframeMultiplier() { return config().getInt(BASE_PATH + ".log-timeframe-multiplier"); }
 
         public String burstEstimationType() { return config().getString(BASE_PATH + ".burst.type"); }
 
