@@ -42,5 +42,5 @@ public interface PipelineBlock {
      */
     default void setSize(int size) { throw new UnsupportedOperationException(); }
 
-    String type();
+    BlockType type();
 }

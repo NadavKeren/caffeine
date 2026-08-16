@@ -192,8 +192,8 @@ public class LruBlock implements PipelineBlock {
     }
 
     @Override
-    public String type() {
-        return "LRU";
+    public BlockType type() {
+        return BlockType.LRU;
     }
 
     static final class Node {

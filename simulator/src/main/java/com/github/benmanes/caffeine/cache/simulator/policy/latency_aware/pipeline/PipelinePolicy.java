@@ -414,7 +414,7 @@ public class PipelinePolicy implements Policy {
         }
     }
 
-    private void debugPrint(String blockType, @Nullable EntryData item, int eventNum) {
+    private void debugPrint(BlockType blockType, @Nullable EntryData item, int eventNum) {
         if (dumper == null) {
             return;
         }
@@ -505,7 +505,7 @@ public class PipelinePolicy implements Policy {
     }
 
     public PipelineState getCurrentState() {
-        String[] types = new String[this.blockCount];
+        BlockType[] types = new BlockType[this.blockCount];
         for (int idx = 0; idx < types.length; ++idx) {
             types[idx] = blocks[idx].type();
         }
@@ -531,17 +531,17 @@ public class PipelinePolicy implements Policy {
         return quota[idx] > 0;
     }
 
-    public String getType(int idx) { return blocks[idx].type(); }
+    public BlockType getType(int idx) { return blocks[idx].type(); }
 
     public void resetTimeframeStats() {
         this.timeframeStats.clear();
     }
 
     public static final class PipelineState {
-        final public String[] types;
+        final public BlockType[] types;
         final public int[] quotas;
 
-        public PipelineState(String[] types, int[] quotas) {
+        public PipelineState(BlockType[] types, int[] quotas) {
             this.types = Arrays.copyOf(types, types.length);
             this.quotas = Arrays.copyOf(quotas, quotas.length);
         }

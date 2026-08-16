@@ -115,7 +115,7 @@ public class LbuBlock implements PipelineBlock {
     }
 
     @Override
-    public String type() {
-        return "LBU";
+    public BlockType type() {
+        return BlockType.LBU;
     }
 }

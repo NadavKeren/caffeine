@@ -345,8 +345,8 @@ public class LfuBlock implements PipelineBlock {
     }
 
     @Override
-    public String type() {
-        return "LFU";
+    public BlockType type() {
+        return BlockType.LFU;
     }
 
     private enum QueueType {

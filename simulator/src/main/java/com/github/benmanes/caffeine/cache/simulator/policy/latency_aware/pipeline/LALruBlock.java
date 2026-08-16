@@ -167,8 +167,8 @@ public class LALruBlock implements PipelineBlock {
     }
 
     @Override
-    public String type() {
-        return "LA-LRU";
+    public BlockType type() {
+        return BlockType.LA_LRU;
     }
 
     private static class LruBlockSettings extends BasicSettings {

@@ -282,8 +282,8 @@ public class LALfuBlock implements PipelineBlock {
     }
 
     @Override
-    public String type() {
-        return "LA-LFU";
+    public BlockType type() {
+        return BlockType.LA_LFU;
     }
 
     private static class LALfuBlockSettings extends BasicSettings {
