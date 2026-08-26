@@ -48,6 +48,8 @@ import com.github.benmanes.caffeine.cache.simulator.policy.irr.IndicatorFrdPolic
 import com.github.benmanes.caffeine.cache.simulator.policy.irr.LirsPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.MockupLAPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.YanLi;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.AdaptiveReorderingPipeline;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.ExploringSampledHillClimber;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.PipelinePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.SampledHillClimber;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.FrequentlyUsedPolicy;
@@ -134,6 +136,8 @@ public final class Registry {
     register(YanLi.class, YanLi::new);
     register(PipelinePolicy.class, PipelinePolicy::policy);
     register(SampledHillClimber.class, SampledHillClimber::new);
+    register(ExploringSampledHillClimber.class, ExploringSampledHillClimber::new);
+    register(AdaptiveReorderingPipeline.class, AdaptiveReorderingPipeline::new);
     register(MockupLAPolicy.class, MockupLAPolicy::new);
   }
 
