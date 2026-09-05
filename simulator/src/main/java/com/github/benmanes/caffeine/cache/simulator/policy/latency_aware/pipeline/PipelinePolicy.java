@@ -12,6 +12,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.LatestLatencyEstimator;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigException;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -52,6 +53,15 @@ public class PipelinePolicy implements Policy {
     final private boolean isCopy;
 
     @Nonnull final private TimeframeStats timeframeStats;
+
+    /***
+     * Per-block hit counters of the current timeframe, keyed by the item's key.
+     * The hit is attributed to the block that served it, thus an item that migrated between blocks
+     * is counted in each of them, according to the hits it got while residing in it.
+     * Allocated only when {@link #enableHitStatistics()} was called, in order to avoid the
+     * bookkeeping cost on ghost copies that do not use it.
+     */
+    @Nullable private Long2IntOpenHashMap[] blockHitCounts = null;
 
     @Nullable private PrintWriter dumper = null;
     @Nullable private PrintWriter opDumpWriter = null;
@@ -169,6 +179,7 @@ public class PipelinePolicy implements Policy {
 
         stats = new PolicyStats(generatePipelineName());
         timeframeStats.clear();
+        clearHitStatistics();
     }
 
     public void copyInto(PipelinePolicy other) {
@@ -187,6 +198,7 @@ public class PipelinePolicy implements Policy {
             other.burstEstimator = this.burstEstimator.createDeepCopy();
         }
         other.timeframeStats.clear();
+        other.clearHitStatistics();
     }
 
     public String generatePipelineName() {
@@ -319,12 +331,19 @@ public class PipelinePolicy implements Policy {
                 block.bookkeeping(event.key());
             }
         } else {
-            for (PipelineBlock block : blocks) {
+            int servingBlockIdx = -1;
+
+            for (int idx = 0; idx < blockCount; ++idx) {
+                final PipelineBlock block = blocks[idx];
                 // Not stopping after item is found in order to let all blocks perform bookkeeping
                 block.bookkeeping(event.key());
 
                 if (entry == null) {
                     entry = block.getEntry(event.key());
+
+                    if (entry != null) {
+                        servingBlockIdx = idx;
+                    }
                 }
 
                 if (DEBUG && opDumpWriter != null && dumper != null && entry != null) {
@@ -336,7 +355,7 @@ public class PipelinePolicy implements Policy {
             if (entry == null) {
                 onMiss(event);
             } else {
-                onCacheHit(entry, event);
+                onCacheHit(entry, event, servingBlockIdx);
             }
         }
 
@@ -426,9 +445,15 @@ public class PipelinePolicy implements Policy {
         dumper.println(eventNum + ":\t" + ConsoleColors.colorString(blockType + " -> ", ConsoleColors.YELLOW) + itemStr);
     }
 
-    private void onCacheHit(EntryData entry, AccessEvent currEvent) {
+    private void onCacheHit(EntryData entry, AccessEvent currEvent, int servingBlockIdx) {
         boolean isAvailable = entry.event().isAvailableAt(currEvent.getRequestTime());
         Assert.assertCondition(isAvailable, "Should not consider an non-available event as cache hit");
+
+        if (blockHitCounts != null) {
+            Assert.assertCondition(servingBlockIdx >= 0 && servingBlockIdx < blockCount,
+                                   () -> String.format("Illegal serving block index: %d", servingBlockIdx));
+            blockHitCounts[servingBlockIdx].addTo(currEvent.key(), 1);
+        }
 
         currEvent.changeEventStatus(AccessEvent.EventStatus.HIT);
         stats.recordHit();
@@ -535,6 +560,76 @@ public class PipelinePolicy implements Policy {
 
     public void resetTimeframeStats() {
         this.timeframeStats.clear();
+        clearHitStatistics();
+    }
+
+    /***
+     * Turns on the collection of the per-block hit counts of the timeframe.
+     * Intended for the statistics based adaptation, which needs to know how the hits of each block
+     * are spread over its quanta.
+     */
+    public void enableHitStatistics() {
+        Assert.assertCondition(!isDummy, "Should not collect hit statistics on a dummy cache");
+
+        this.blockHitCounts = new Long2IntOpenHashMap[blockCount];
+        for (int idx = 0; idx < blockCount; ++idx) {
+            this.blockHitCounts[idx] = new Long2IntOpenHashMap(blocks[idx].capacity());
+            this.blockHitCounts[idx].defaultReturnValue(0);
+        }
+    }
+
+    private void clearHitStatistics() {
+        if (blockHitCounts != null) {
+            for (var counts : blockHitCounts) {
+                counts.clear();
+            }
+        }
+    }
+
+    /***
+     * Summarizes the hits of the current timeframe as a per-block profile of its quanta.
+     * The items currently residing in a block are sorted by the number of hits they got while residing
+     * in it, in a descending order, and cut into bands of a single quantum each. Thus the last band of
+     * a block holds the sum of the hits of the items that got the least hits, the band before it holds
+     * the sum of the second least hit items, and so on. An item that got no hit at all contributes a
+     * zero, and so does an unoccupied slot of a partially filled block.
+     * Items that were evicted from the block during the timeframe are not counted - the decision is
+     * about the items the block currently holds.
+     *
+     * @return for each block, its quota band sums, ordered from the most hit band to the least hit one.
+     */
+    public int[][] getTimeframeHitDistribution() {
+        Assert.assertCondition(blockHitCounts != null, "The hit statistics collection was not enabled");
+
+        int[][] distribution = new int[blockCount][];
+
+        for (int blockIdx = 0; blockIdx < blockCount; ++blockIdx) {
+            final int currQuota = quota[blockIdx];
+            int[] bands = new int[currQuota];
+
+            final var residentKeys = blocks[blockIdx].keys();
+            final var counters = blockHitCounts[blockIdx];
+            int[] counts = new int[residentKeys.size()];
+            int idx = 0;
+            for (var keyIterator = residentKeys.iterator(); keyIterator.hasNext(); ) {
+                counts[idx++] = counters.get(keyIterator.nextLong());
+            }
+
+            Arrays.sort(counts);
+
+            // The counts are sorted in an ascending order, thus iterated backwards for a descending one
+            int countIdx = counts.length - 1;
+            for (int bandIdx = 0; bandIdx < currQuota && countIdx >= 0; ++bandIdx) {
+                for (int item = 0; item < quantumSize && countIdx >= 0; ++item) {
+                    bands[bandIdx] += counts[countIdx];
+                    --countIdx;
+                }
+            }
+
+            distribution[blockIdx] = bands;
+        }
+
+        return distribution;
     }
 
     public static final class PipelineState {

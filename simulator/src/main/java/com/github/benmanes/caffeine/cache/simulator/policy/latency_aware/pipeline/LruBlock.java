@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.google.common.base.MoreObjects;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongSet;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -143,6 +144,11 @@ public class LruBlock implements PipelineBlock {
     @Override
     public EntryData getVictim() {
         return getVictimNode().data;
+    }
+
+    @Override
+    public LongSet keys() {
+        return items.keySet();
     }
 
     @Override

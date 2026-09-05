@@ -10,6 +10,7 @@ import com.google.common.base.MoreObjects;
 import com.typesafe.config.Config;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongSet;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -277,6 +278,11 @@ public class LfuBlock implements PipelineBlock {
     @Override
     public EntryData getVictim() {
         return getVictimNode().data;
+    }
+
+    @Override
+    public LongSet keys() {
+        return items.keySet();
     }
 
     @Override

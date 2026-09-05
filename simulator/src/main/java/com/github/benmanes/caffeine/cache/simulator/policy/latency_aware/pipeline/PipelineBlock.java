@@ -1,6 +1,7 @@
 package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline;
 
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
+import it.unimi.dsi.fastutil.longs.LongSet;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -20,6 +21,12 @@ public interface PipelineBlock {
     @Nullable EntryData insert(EntryData data);
 
     EntryData getVictim();
+
+    /***
+     * @return the keys of the items currently residing in the block.
+     */
+    LongSet keys();
+
     int size();
 
     int capacity();

@@ -50,6 +50,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.MockupL
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.YanLi;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.PipelinePolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.SampledHillClimber;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.StatisticsBasedClimber;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.FrequentlyUsedPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.LinkedPolicy;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.MultiQueuePolicy;
@@ -134,6 +135,7 @@ public final class Registry {
     register(YanLi.class, YanLi::new);
     register(PipelinePolicy.class, PipelinePolicy::policy);
     register(SampledHillClimber.class, SampledHillClimber::new);
+    register(StatisticsBasedClimber.class, StatisticsBasedClimber::new);
     register(MockupLAPolicy.class, MockupLAPolicy::new);
   }
 

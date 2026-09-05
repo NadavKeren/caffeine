@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.sketch.BurstBlock;
+import it.unimi.dsi.fastutil.longs.LongSet;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -97,6 +98,11 @@ public class LbuBlock implements PipelineBlock {
     @Override
     public EntryData getVictim() {
         return block.getVictim();
+    }
+
+    @Override
+    public LongSet keys() {
+        return block.keys();
     }
 
     @Override

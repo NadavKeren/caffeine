@@ -8,6 +8,7 @@ import it.unimi.dsi.fastutil.Pair;
 import it.unimi.dsi.fastutil.longs.LongComparator;
 import it.unimi.dsi.fastutil.longs.LongObjectImmutablePair;
 import it.unimi.dsi.fastutil.longs.LongObjectPair;
+import it.unimi.dsi.fastutil.longs.LongSet;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -128,6 +129,8 @@ public final class BurstBlock {
     public int capacity() { return this.currentCapacity; }
 
     public void dump() { heap.dump(); }
+
+    public LongSet keys() { return heap.keys(); }
 
     public int size() {
         return heap.size();

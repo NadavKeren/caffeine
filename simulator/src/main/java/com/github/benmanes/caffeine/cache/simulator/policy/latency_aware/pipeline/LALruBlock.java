@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import com.typesafe.config.Config;
 
 import javax.annotation.Nullable;
@@ -144,6 +145,11 @@ public class LALruBlock implements PipelineBlock {
     @Override
     public EntryData getVictim() {
         return block.findVictim();
+    }
+
+    @Override
+    public LongSet keys() {
+        return block.keys();
     }
 
     @Override

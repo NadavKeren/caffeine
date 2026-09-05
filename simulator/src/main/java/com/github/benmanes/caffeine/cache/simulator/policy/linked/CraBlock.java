@@ -24,6 +24,7 @@ import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.google.common.base.MoreObjects;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongSet;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -100,6 +101,10 @@ public final class CraBlock {
 
         this.normalizationBias = other.normalizationBias;
         this.normalizationFactor = other.normalizationFactor;
+    }
+
+    public LongSet keys() {
+        return data.keySet();
     }
 
     public void clear() {

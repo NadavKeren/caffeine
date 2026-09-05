@@ -7,6 +7,7 @@ import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongComparator;
 import it.unimi.dsi.fastutil.longs.LongObjectPair;
 import it.unimi.dsi.fastutil.longs.LongObjectImmutablePair;
+import it.unimi.dsi.fastutil.longs.LongSet;
 
 import javax.annotation.Nullable;
 import java.io.FileWriter;
@@ -217,6 +218,10 @@ public class SearchableMinimumHeap<V> {
         }
 
         return returnValue;
+    }
+
+    public LongSet keys() {
+        return valuesMap.keySet();
     }
 
     public int size() {

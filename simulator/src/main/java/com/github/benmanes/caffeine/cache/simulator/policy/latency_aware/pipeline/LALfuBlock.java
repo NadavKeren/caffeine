@@ -9,6 +9,8 @@ import com.github.benmanes.caffeine.cache.simulator.policy.EntryData;
 import com.github.benmanes.caffeine.cache.simulator.policy.LatencyEstimator;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.github.benmanes.caffeine.cache.simulator.policy.linked.CraBlock;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import com.typesafe.config.Config;
 
 import javax.annotation.Nullable;
@@ -260,6 +262,14 @@ public class LALfuBlock implements PipelineBlock {
     @Override
     public EntryData getVictim() {
         return probationBlock.findVictim();
+    }
+
+    @Override
+    public LongSet keys() {
+        LongSet keys = new LongOpenHashSet(probationBlock.keys());
+        keys.addAll(protectedBlock.keys());
+
+        return keys;
     }
 
     @Override
