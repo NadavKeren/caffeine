@@ -52,6 +52,16 @@ public class StatisticsBasedClimber implements Policy {
         stats = new PolicyStats("SBC " + mainPipeline.generatePipelineName());
         adaptionTimeframe = settings.adaptionMultiplier() * mainPipeline.cacheCapacity();
 
+        final int[] initialQuotas = mainPipeline.getQuota();
+        for (int idx = 0; idx < blockCount; ++idx) {
+            final int idxCopy = idx;
+            Assert.assertCondition(initialQuotas[idx] >= MINIMAL_QUOTA,
+                                   () -> String.format("Illegal initial quota for block %s: %d, the minimal quota is %d",
+                                                       mainPipeline.getType(idxCopy),
+                                                       initialQuotas[idxCopy],
+                                                       MINIMAL_QUOTA));
+        }
+
         if (DUMP_STATES) {
             quotaDump = prepareDump("quota_dump");
 
