@@ -35,12 +35,14 @@ public class SampledHillClimber implements Policy {
     private final SHCStats stats;
     private final int blockCount;
     private final int adaptionTimeframe;
+    private final AdaptationObjective objective;
     private int opsSinceAdaption = 0;
     private final int sampleOrder;
 
     public SampledHillClimber(Config config) {
         var settings = new SampledHillClimberSettings(config);
         sampleOrder = settings.sampleOrderFactor();
+        objective = settings.objective();
         mainPipeline = new PipelinePolicy(config);
         blockCount = mainPipeline.blockCount();
         stats = new SHCStats("Sampled " + sampleOrder + " " + mainPipeline.generatePipelineName(), sampleOrder);
@@ -133,7 +135,7 @@ public class SampledHillClimber implements Policy {
     }
 
     private void adapt(int eventNum) {
-        final double currentAvg = this.mainPipeline.getTimeframeAveragePenalty();
+        final double currentAvg = this.mainPipeline.getTimeframeScore(objective);
 
         this.mainPipeline.resetTimeframeStats();
 
@@ -143,7 +145,7 @@ public class SampledHillClimber implements Policy {
         double[] timeframeResults = new double[this.ghostCaches.size()];
         for (int idx = 0; idx < this.ghostCaches.size(); ++idx) {
             var currGhostCache = this.ghostCaches.get(idx).first();
-            double currGhostAvg = currGhostCache.getTimeframeAveragePenalty();
+            double currGhostAvg = currGhostCache.getTimeframeScore(objective);
             if (currGhostAvg < minAvg) {
                 minAvg = currGhostAvg;
                 minIdx = idx;
@@ -242,6 +244,10 @@ public class SampledHillClimber implements Policy {
         public int sampleOrderFactor() { return config().getInt(BASE_PATH + ".sample-order-factor"); }
 
         public int adaptionMultiplier() { return config().getInt(BASE_PATH + ".adaption-multiplier"); }
+
+        public AdaptationObjective objective() {
+            return AdaptationObjective.parse(config().getString(BASE_PATH + ".objective"));
+        }
     }
 
     @SuppressWarnings("this-escape")

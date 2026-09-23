@@ -463,7 +463,22 @@ public class PipelinePolicy implements Policy {
     }
 
     public double getTimeframeHitRatio() {
-        return isDummy ? Double.MAX_VALUE : this.timeframeStats.hitRatio();
+        return isDummy ? 0d : this.timeframeStats.hitRatio();
+    }
+
+    /***
+     * The value a controller minimizes for the given objective over the last timeframe.
+     * Both objectives are scored in the same direction, so a dummy is always the worst candidate.
+     */
+    public double getTimeframeScore(AdaptationObjective objective) {
+        if (isDummy) {
+            return Double.MAX_VALUE;
+        }
+
+        return switch (objective) {
+            case LATENCY -> this.timeframeStats.avgPenalty();
+            case HIT_RATIO -> this.timeframeStats.missRatio();
+        };
     }
 
     public String getTimeframeStats() {
@@ -482,6 +497,49 @@ public class PipelinePolicy implements Policy {
 
         ++quota[incIdx];
         --quota[decIdx];
+    }
+
+    /***
+     * Moves the pipeline to an arbitrary allocation by a sequence of single-quantum moves, pairing
+     * each block that needs to grow against one that needs to shrink. Going through moveQuantum keeps
+     * the residents of a shrinking block, rather than rebuilding the pipeline around the target.
+     * @param targetQuota - the wanted quanta per block, summing to the total number of quanta.
+     */
+    public void moveTo(int[] targetQuota) {
+        Assert.assertCondition(targetQuota.length == blockCount,
+                               () -> String.format("Quota vector of length %d for a pipeline of %d blocks",
+                                                   targetQuota.length,
+                                                   blockCount));
+
+        final int targetSum = Arrays.stream(targetQuota).sum();
+        Assert.assertCondition(targetSum == totalQuanta,
+                               () -> String.format("The target quota sums to %d instead of %d",
+                                                   targetSum,
+                                                   totalQuanta));
+
+        int incIdx = 0;
+        int decIdx = 0;
+
+        while (true) {
+            while (incIdx < blockCount && targetQuota[incIdx] <= quota[incIdx]) {
+                ++incIdx;
+            }
+
+            while (decIdx < blockCount && targetQuota[decIdx] >= quota[decIdx]) {
+                ++decIdx;
+            }
+
+            if (incIdx >= blockCount || decIdx >= blockCount) {
+                break;
+            }
+
+            moveQuantum(incIdx, decIdx);
+        }
+
+        Assert.assertCondition(Arrays.equals(quota, targetQuota),
+                               () -> String.format("Failed to reach the target allocation: wanted %s got %s",
+                                                   Arrays.toString(targetQuota),
+                                                   Arrays.toString(quota)));
     }
 
     public void makeDummy() {
@@ -695,6 +753,10 @@ public class PipelinePolicy implements Policy {
 
         public double avgPenalty() { return  penalty / totalCount(); }
 
-        public double hitRatio() { return 100d * hitCount / totalCount(); }
+        // A delayed hit is served by the cache, so it counts as a hit here the same way it does in
+        // PolicyStats.hitRate().
+        public double hitRatio() { return (double) (hitCount + delayedCount) / totalCount(); }
+
+        public double missRatio() { return (double) missCount / totalCount(); }
     }
 }
