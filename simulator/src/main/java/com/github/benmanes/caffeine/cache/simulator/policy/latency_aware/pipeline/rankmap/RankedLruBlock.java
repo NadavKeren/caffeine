@@ -5,6 +5,8 @@ import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import it.unimi.dsi.fastutil.longs.Long2DoubleMap;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 
+import java.util.function.LongConsumer;
+
 /***
  * The recency board: {@code LruBlock}'s discipline at the full cache capacity.
  * <p>
@@ -16,6 +18,7 @@ public final class RankedLruBlock implements RankedBlock {
     final private OrderStatisticTree<ScoredKey> order = new OrderStatisticTree<>(ScoredKey.ORDER);
     final private Long2DoubleMap scores;
 
+    private LongConsumer departures = key -> {};
     private long opCounter = 0;
 
     public RankedLruBlock(int capacity) {
@@ -65,6 +68,7 @@ public final class RankedLruBlock implements RankedBlock {
             ScoredKey victim = order.min();
             order.remove(victim);
             scores.remove(victim.key());
+            departures.accept(victim.key());
         }
 
         final double score = ++opCounter;
@@ -73,6 +77,11 @@ public final class RankedLruBlock implements RankedBlock {
 
         Assert.assertCondition(order.size() == scores.size(), "LRU board: order and score map diverged");
         Assert.assertCondition(order.size() <= capacity, "LRU board: capacity overflow");
+    }
+
+    @Override
+    public void onDeparture(LongConsumer listener) {
+        this.departures = listener;
     }
 
     @Override

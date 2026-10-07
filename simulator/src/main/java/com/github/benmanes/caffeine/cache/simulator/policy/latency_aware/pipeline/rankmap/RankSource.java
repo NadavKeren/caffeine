@@ -2,6 +2,8 @@ package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeli
 
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 
+import java.util.function.LongConsumer;
+
 /***
  * Where the controller gets its shadow rankings from: either boards maintained live, or a recording
  * of the boards made by an earlier run over the same trace and cache size.
@@ -22,6 +24,13 @@ public interface RankSource {
 
     /*** Whether the boards have seen as many distinct keys as the cache can hold. */
     boolean isWarm();
+
+    /***
+     * Hands out every key that has left all the boards since the previous call, and is still off all
+     * of them now. A key that dropped out and came back in between is not reported. Called at
+     * decisions only: a replay knows the boards' membership only at its snapshots.
+     */
+    void drainDepartures(LongConsumer consumer);
 
     default void close() {}
 }

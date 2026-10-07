@@ -32,6 +32,7 @@ public final class PeriodicResetCountMin4 extends CountMin4 {
 
   int additions;
   int period;
+  int resets;
 
   public PeriodicResetCountMin4(Config config) {
     super(config);
@@ -88,5 +89,11 @@ public final class PeriodicResetCountMin4 extends CountMin4 {
     }
     additions = (additions - (count >>> 2)) >>> 1;
     doorkeeper.clear();
+    resets++;
+  }
+
+  /** Returns how many times the counters have been halved, so a reader can tell when they aged. */
+  public int resets() {
+    return resets;
   }
 }

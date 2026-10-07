@@ -10,6 +10,7 @@ import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.LongConsumer;
 
 /***
  * Maintains the shadow rankings live and records them, so that later runs over the same trace and
@@ -132,6 +133,11 @@ public final class RankDataWriter implements RankSource {
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot record a board snapshot", e);
         }
+    }
+
+    @Override
+    public void drainDepartures(LongConsumer consumer) {
+        boards.drainDepartures(consumer);
     }
 
     @Override

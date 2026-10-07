@@ -2,6 +2,8 @@ package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeli
 
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.typesafe.config.Config;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
@@ -10,6 +12,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.LongConsumer;
 
 /***
  * Replays a recorded set of shadow rankings. No board is maintained, so the whole order-statistic
@@ -30,6 +33,8 @@ public final class RankDataReader implements RankSource {
     final private long warmAt;
 
     private long[][] snapshots;
+    /*** Everything that may have left the boards since the last drain: the members then, and every key requested since. */
+    private LongOpenHashSet mayHaveDeparted = new LongOpenHashSet();
     private long requestIndex = 0;
     private boolean closed = false;
 
@@ -99,6 +104,8 @@ public final class RankDataReader implements RankSource {
 
     @Override
     public int[] preAccessRanks(long key) {
+        mayHaveDeparted.add(key);
+
         // A fresh array each request: a benefit window holds on to the vector it opened with.
         int[] ranks = new int[stageCount];
 
@@ -158,6 +165,32 @@ public final class RankDataReader implements RankSource {
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot read a board snapshot from " + path, e);
         }
+    }
+
+    /***
+     * There is no eviction stream in a recording, so the departures are recovered from membership: a
+     * key that was on a board at the last drain, or was requested since, and is in no snapshot now.
+     * The live boards report exactly that set, since every such key must have been evicted or
+     * declined on the way.
+     */
+    @Override
+    public void drainDepartures(LongConsumer consumer) {
+        var members = new LongOpenHashSet();
+        for (long[] snapshot : snapshots) {
+            for (long key : snapshot) {
+                members.add(key);
+            }
+        }
+
+        for (LongIterator iterator = mayHaveDeparted.iterator(); iterator.hasNext(); ) {
+            final long key = iterator.nextLong();
+
+            if (!members.contains(key)) {
+                consumer.accept(key);
+            }
+        }
+
+        mayHaveDeparted = members;
     }
 
     @Override

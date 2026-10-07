@@ -32,6 +32,8 @@ public final class AllocationTree {
     final private Node root;
     final private int[][] candidates;
     final private double[] score;
+    /*** Every folded credit, undecayed: what each candidate would have gained over the whole run. */
+    final private double[] lifetime;
 
     public AllocationTree(int stageCount, int totalQuanta) {
         Assert.assertCondition(stageCount >= 2, () -> "A pipeline needs at least two stages, got " + stageCount);
@@ -43,6 +45,7 @@ public final class AllocationTree {
         this.root = builder.build(0, totalQuanta, new int[stageCount]);
         this.candidates = builder.candidates.toArray(new int[0][]);
         this.score = new double[candidates.length];
+        this.lifetime = new double[candidates.length];
     }
 
     public int candidateCount() {
@@ -63,6 +66,10 @@ public final class AllocationTree {
 
     public double score(int candidate) {
         return score[candidate];
+    }
+
+    public double lifetime(int candidate) {
+        return lifetime[candidate];
     }
 
     /*** The candidate whose projected score is the highest. */
@@ -156,6 +163,7 @@ public final class AllocationTree {
             final double gained = inherited + node.leafAcc;
             node.leafAcc = 0d;
             score[node.leafIndex] = intervalDecay * score[node.leafIndex] + gained;
+            lifetime[node.leafIndex] += gained;
             return;
         }
 

@@ -8,6 +8,8 @@ import com.typesafe.config.Config;
 import it.unimi.dsi.fastutil.longs.Long2DoubleMap;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 
+import java.util.function.LongConsumer;
+
 /***
  * The frequency board: {@code LfuBlock}'s discipline at the full cache capacity - its own TinyLFU
  * sketch deciding admission, and the same segmented probation / protected structure.
@@ -30,6 +32,7 @@ public final class RankedLfuBlock implements RankedBlock {
     final private Long2DoubleMap probationScores;
     final private Long2DoubleMap protectedScores;
 
+    private LongConsumer departures = key -> {};
     private long opCounter = 0;
 
     /***
@@ -128,6 +131,7 @@ public final class RankedLfuBlock implements RankedBlock {
 
     private void admit(long key) {
         if (capacity == 0) {
+            departures.accept(key);
             return;
         }
 
@@ -135,6 +139,7 @@ public final class RankedLfuBlock implements RankedBlock {
             ScoredKey victim = probation.size() > 0 ? probation.min() : protectedSegment.min();
 
             if (!admittor.admit(key, victim.key())) {
+                departures.accept(key);
                 return;
             }
 
@@ -145,6 +150,8 @@ public final class RankedLfuBlock implements RankedBlock {
                 protectedSegment.remove(victim);
                 protectedScores.remove(victim.key());
             }
+
+            departures.accept(victim.key());
         }
 
         addToProbation(key);
@@ -160,6 +167,11 @@ public final class RankedLfuBlock implements RankedBlock {
         final double score = ++opCounter;
         protectedScores.put(key, score);
         protectedSegment.add(new ScoredKey(score, key));
+    }
+
+    @Override
+    public void onDeparture(LongConsumer listener) {
+        this.departures = listener;
     }
 
     private void validate() {

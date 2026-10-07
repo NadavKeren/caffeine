@@ -38,11 +38,14 @@ public final class RankMapClimber implements Policy {
     final private AllocationTree tree;
     final private ReachDepthSolver solver;
     final private AdaptationObjective objective;
+    final private BenefitEstimatorType benefitType;
     @Nullable final private SequenceBenefitEstimator benefitEstimator;
+    @Nullable final private ItemBurstCostEstimator itemEstimator;
     @Nullable final private BenefitDataWriter benefitWriter;
     @Nullable final private BenefitDataReader benefitReader;
     @Nullable final private OracleScorer oracle;
     @Nullable final private PrintWriter decisionLog;
+    final private String scoreDump;
 
     final private PolicyStats stats;
     final private int decisionInterval;
@@ -56,12 +59,14 @@ public final class RankMapClimber implements Policy {
     private int moves = 0;
     private long requests = 0;
     private boolean intervalUsable = false;
+    private long warmAt = -1;
 
     public RankMapClimber(Config config) {
         var settings = new RankMapSettings(config);
 
         this.mainPipeline = new PipelinePolicy(config);
         this.objective = settings.objective();
+        this.benefitType = settings.benefitEstimator();
         this.moveThreshold = settings.moveThreshold();
 
         final int capacity = mainPipeline.cacheCapacity();
@@ -84,14 +89,15 @@ public final class RankMapClimber implements Policy {
         this.solver = new ReachDepthSolver(rankSource, tree, capacity / settings.totalQuanta(config));
 
         // A recording carries both objectives' data, so a recording run keeps the latency windows
-        // whatever it optimizes, and a latency replay reads them instead of estimating them.
+        // whatever it optimizes, and a windowed latency replay reads them instead of estimating them.
+        final boolean windowedLatency = objective == AdaptationObjective.LATENCY && benefitType == BenefitEstimatorType.WINDOW;
         if (rankSource instanceof RankDataWriter writer) {
             this.benefitFlushInterval = writer.snapshotInterval();
             this.benefitWriter = new BenefitDataWriter(config, RankDataFormat.benefitFileFor(writer.path()),
                                                        rankSource.stageCount(), capacity, benefitFlushInterval);
             this.benefitReader = null;
             this.benefitEstimator = new SequenceBenefitEstimator(config, capacity);
-        } else if (rankSource instanceof RankDataReader reader && objective == AdaptationObjective.LATENCY) {
+        } else if (rankSource instanceof RankDataReader reader && windowedLatency) {
             this.benefitWriter = null;
             this.benefitReader = new BenefitDataReader(config, RankDataFormat.benefitFileFor(reader.path()),
                                                        rankSource.stageCount());
@@ -101,10 +107,14 @@ public final class RankMapClimber implements Policy {
             this.benefitWriter = null;
             this.benefitReader = null;
             this.benefitFlushInterval = decisionInterval;
-            this.benefitEstimator = objective == AdaptationObjective.LATENCY
-                                    ? new SequenceBenefitEstimator(config, capacity)
-                                    : null;
+            this.benefitEstimator = windowedLatency ? new SequenceBenefitEstimator(config, capacity) : null;
         }
+
+        // The per-item estimators need nothing but the request stream and the ranks, so they run the
+        // same live and on a replay, and nothing of theirs is recorded.
+        this.itemEstimator = objective == AdaptationObjective.LATENCY && benefitType != BenefitEstimatorType.WINDOW
+                             ? new ItemBurstCostEstimator(config, benefitType, capacity)
+                             : null;
 
         // Windows are closed at least at every decision, so none is scored against depths other than
         // the ones frozen while it was open. A recording closes them at every snapshot instead, which
@@ -130,6 +140,7 @@ public final class RankMapClimber implements Policy {
 
         this.stats = new PolicyStats("RankMap " + mainPipeline.generatePipelineName());
         this.decisionLog = openDecisionLog(settings, mainPipeline.blockCount());
+        this.scoreDump = settings.scoreDump();
 
         solver.refresh();
     }
@@ -212,10 +223,18 @@ public final class RankMapClimber implements Policy {
                 creditCandidates(ranks, currentWeight);
             }
 
+            if (warmAt < 0) {
+                warmAt = requests;
+            }
+
             if (benefitReader != null) {
                 benefitReader.emit(requests, this::creditBenefit);
             } else if (benefitEstimator != null) {
                 benefitEstimator.onArrival(event, ranks, this::emitBenefit);
+            }
+
+            if (itemEstimator != null) {
+                creditBenefit(ranks, itemEstimator.onArrival(event));
             }
         }
 
@@ -241,7 +260,7 @@ public final class RankMapClimber implements Policy {
             benefitWriter.write(requests, ranks, benefit);
         }
 
-        if (objective == AdaptationObjective.LATENCY) {
+        if (objective == AdaptationObjective.LATENCY && benefitType == BenefitEstimatorType.WINDOW) {
             creditBenefit(ranks, benefit);
         }
     }
@@ -302,6 +321,11 @@ public final class RankMapClimber implements Policy {
         if (oracle != null) {
             oracle.verifyDepths();
         }
+
+        // Items leave the boards one eviction at a time, but are forgotten only here, so an item that
+        // drops out and returns within one decision interval keeps its history. The sources always
+        // drain, or the departures would pile up.
+        rankSource.drainDepartures(itemEstimator != null ? itemEstimator::reset : key -> {});
 
         opsSinceDecision = 0;
     }
@@ -365,6 +389,50 @@ public final class RankMapClimber implements Policy {
 
         if (decisionLog != null) {
             decisionLog.close();
+        }
+
+        writeScoreDump();
+    }
+
+    /***
+     * Every candidate's projection at the end of the run, for comparing against the latency that
+     * static pipelines actually reach at those allocations. {@code lifetime} sums the folded credits
+     * without the decay between intervals. Each credit still carries its weight within its interval,
+     * which is the same for every candidate a request credits.
+     */
+    private void writeScoreDump() {
+        if (scoreDump.isEmpty()) {
+            return;
+        }
+
+        try {
+            Path target = Path.of(scoreDump);
+            if (target.getParent() != null) {
+                Files.createDirectories(target.getParent());
+            }
+
+            try (var writer = new PrintWriter(Files.newBufferedWriter(target, StandardCharsets.UTF_8))) {
+                var header = new StringBuilder();
+                for (int block = 0; block < tree.stageCount(); ++block) {
+                    header.append("quota").append(block).append(',');
+                }
+                header.append("score,lifetime,warm_at,requests");
+                writer.println(header);
+
+                for (int candidate = 0; candidate < tree.candidateCount(); ++candidate) {
+                    var row = new StringBuilder();
+                    for (int quota : tree.quotaOf(candidate)) {
+                        row.append(quota).append(',');
+                    }
+                    row.append(tree.score(candidate))
+                       .append(',').append(tree.lifetime(candidate))
+                       .append(',').append(warmAt)
+                       .append(',').append(requests);
+                    writer.println(row);
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot write the score dump to " + scoreDump, e);
         }
     }
 
@@ -469,6 +537,12 @@ public final class RankMapClimber implements Policy {
         public int snapshotInterval() { return config().getInt(BASE_PATH + ".precompute.snapshot-interval"); }
 
         public String decisionLog() { return config().getString(BASE_PATH + ".decision-log"); }
+
+        public BenefitEstimatorType benefitEstimator() {
+            return BenefitEstimatorType.parse(config().getString(BASE_PATH + ".benefit.estimator"));
+        }
+
+        public String scoreDump() { return config().getString(BASE_PATH + ".score-dump"); }
 
         public int totalQuanta(Config config) {
             return new PipelinePolicy.PipelineSettings(config).numOfQuanta();

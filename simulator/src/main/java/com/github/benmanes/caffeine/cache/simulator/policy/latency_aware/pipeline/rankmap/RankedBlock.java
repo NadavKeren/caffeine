@@ -2,6 +2,8 @@ package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeli
 
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 
+import java.util.function.LongConsumer;
+
 /***
  * A shadow ranking: one component policy run at the full cache capacity, exposing the position of a
  * key in its own eviction order.
@@ -35,6 +37,12 @@ public interface RankedBlock {
 
     /*** Post-access update: reorder on a hit, admit and evict on a miss. */
     void update(AccessEvent event);
+
+    /***
+     * Receives every key this board drops: a victim it evicts, and a requested key it declines to
+     * admit. Lets a consumer follow the board's membership without scanning it.
+     */
+    void onDeparture(LongConsumer listener);
 
     int size();
 

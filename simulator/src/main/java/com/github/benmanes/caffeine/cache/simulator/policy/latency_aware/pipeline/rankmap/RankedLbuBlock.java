@@ -9,6 +9,8 @@ import com.typesafe.config.Config;
 import it.unimi.dsi.fastutil.longs.Long2DoubleMap;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 
+import java.util.function.LongConsumer;
+
 /***
  * The burstiness board: {@code LbuBlock} / {@code BurstBlock}'s discipline at the full cache
  * capacity, with the min-heap replaced by an order-statistic tree.
@@ -33,6 +35,7 @@ public final class RankedLbuBlock implements RankedBlock {
     final private OrderStatisticTree<ScoredKey> order = new OrderStatisticTree<>(ScoredKey.ORDER);
     final private Long2DoubleMap scores;
 
+    private LongConsumer departures = key -> {};
     private int version = 0;
     private int opsSinceAging = 0;
 
@@ -91,6 +94,8 @@ public final class RankedLbuBlock implements RankedBlock {
         } else if (capacity > 0) {
             estimator.record(key, event.missPenalty(), event.getRequestTime());
             admit(key);
+        } else {
+            departures.accept(key);
         }
 
         ageIfNeeded();
@@ -113,12 +118,14 @@ public final class RankedLbuBlock implements RankedBlock {
                                           - estimator.getLatencyEstimation(victim.key()));
         if (comparison <= 0) {
             estimator.remove(key);
+            departures.accept(key);
             return;
         }
 
         order.remove(victim);
         scores.remove(victim.key());
         estimator.remove(victim.key());
+        departures.accept(victim.key());
         store(key);
     }
 
@@ -141,6 +148,11 @@ public final class RankedLbuBlock implements RankedBlock {
             ++version;
             opsSinceAging = 0;
         }
+    }
+
+    @Override
+    public void onDeparture(LongConsumer listener) {
+        this.departures = listener;
     }
 
     @Override

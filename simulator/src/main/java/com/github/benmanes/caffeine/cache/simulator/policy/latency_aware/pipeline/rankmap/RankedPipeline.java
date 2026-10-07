@@ -4,6 +4,10 @@ import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.PipelinePolicy;
 import com.typesafe.config.Config;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+
+import java.util.function.LongConsumer;
 
 /***
  * The shadow rankings of a pipeline: one board per stage, each run at the full cache capacity.
@@ -19,6 +23,7 @@ import com.typesafe.config.Config;
 public final class RankedPipeline implements RankSource {
     final private RankedBlock[] boards;
     final private int capacity;
+    final private LongOpenHashSet departed = new LongOpenHashSet();
 
     public RankedPipeline(Config config) {
         var settings = new PipelinePolicy.PipelineSettings(config);
@@ -30,6 +35,7 @@ public final class RankedPipeline implements RankSource {
         for (int idx = 0; idx < boards.length; ++idx) {
             var blockSettings = new PipelinePolicy.PipelineBlockSettings(blockConfigs.get(idx));
             boards[idx] = createBoard(blockSettings.type(), config);
+            boards[idx].onDeparture(departed::add);
         }
     }
 
@@ -52,6 +58,10 @@ public final class RankedPipeline implements RankSource {
             case "LRU" -> new RankedLruBlock(capacity);
             case "LFU" -> new RankedLfuBlock(capacity, lfuProbationSize(config), config);
             case "LBU" -> new RankedLbuBlock(capacity, config);
+            // CRA's score depends on the time since the last access, so two keys swap places without
+            // either being touched and no fixed ordering can hold it. Recency is the approximation.
+            case "LA-LRU" -> new RankedLruBlock(capacity);
+            case "LA-LFU" -> new RankedLaLfuBlock(capacity, config);
             default -> throw new IllegalStateException("No shadow ranking for block type: " + type);
         };
     }
@@ -114,6 +124,29 @@ public final class RankedPipeline implements RankSource {
         }
 
         return true;
+    }
+
+    @Override
+    public void drainDepartures(LongConsumer consumer) {
+        for (LongIterator iterator = departed.iterator(); iterator.hasNext(); ) {
+            final long key = iterator.nextLong();
+
+            if (!onAnyBoard(key)) {
+                consumer.accept(key);
+            }
+        }
+
+        departed.clear();
+    }
+
+    private boolean onAnyBoard(long key) {
+        for (RankedBlock board : boards) {
+            if (board.contains(key)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void validate() {
