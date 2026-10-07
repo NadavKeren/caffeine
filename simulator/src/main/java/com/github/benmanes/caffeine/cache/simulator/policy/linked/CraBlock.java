@@ -257,7 +257,7 @@ public final class CraBlock {
         int listNum = 0;
         double delta = latencyEstimator.getDelta(key);
 
-        if (delta < 0) {
+        if (delta > 0) {
             int expectedListNum = (int) ((delta - normalizationBias) / normalizationFactor);
             listNum = Math.max(1, Math.min(expectedListNum, maxLists));
         }
