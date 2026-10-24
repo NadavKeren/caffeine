@@ -84,20 +84,42 @@ public final class RankedLbuBlock implements RankedBlock {
     }
 
     @Override
-    public void update(AccessEvent event) {
+    public void onHit(AccessEvent event) {
         final long key = event.key();
+        estimator.addValueToRecord(key, 0, event.getRequestTime());
+        order.remove(new ScoredKey(scores.get(key), key));
+        store(key);
+    }
 
-        if (contains(key)) {
-            estimator.addValueToRecord(key, 0, event.getRequestTime());
-            order.remove(new ScoredKey(scores.get(key), key));
-            store(key);
-        } else if (capacity > 0) {
-            estimator.record(key, event.missPenalty(), event.getRequestTime());
+    /*** The burst estimate starts at the miss, as the pipeline records it there and not at insertion. */
+    @Override
+    public void onMiss(AccessEvent event) {
+        if (capacity > 0) {
+            estimator.record(event.key(), event.missPenalty(), event.getRequestTime());
+        }
+    }
+
+    /*** A delayed hit adds to the burst of the fetch it waits on, the way the pipeline records it. */
+    @Override
+    public void onDelayedHit(AccessEvent event, double availabilityTime) {
+        if (capacity == 0) {
+            return;
+        }
+
+        estimator.addValueToRecord(event.key(), availabilityTime - event.getRequestTime(), event.getRequestTime());
+    }
+
+    @Override
+    public void insert(long key) {
+        if (capacity > 0) {
             admit(key);
         } else {
             departures.accept(key);
         }
+    }
 
+    @Override
+    public void afterRequest() {
         ageIfNeeded();
 
         Assert.assertCondition(order.size() == scores.size(), "LBU board: order and score map diverged");

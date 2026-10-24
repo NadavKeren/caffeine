@@ -35,8 +35,38 @@ public interface RankedBlock {
     /*** Pre-access bookkeeping, mirroring {@code PipelineBlock.bookkeeping}. */
     default void bookkeeping(long key) {}
 
-    /*** Post-access update: reorder on a hit, admit and evict on a miss. */
-    void update(AccessEvent event);
+    /*** A request to a key the board holds: reorder it, as the block's {@code getEntry} does. */
+    void onHit(AccessEvent event);
+
+    /***
+     * A request to a key the board neither holds nor is fetching. Whatever the block's side of the
+     * pipeline learns at the miss is taken here; the key itself joins the board only at {@link #insert}.
+     */
+    default void onMiss(AccessEvent event) {}
+
+    /*** A request to a key the board is still fetching, which the pipeline serves as a delayed hit. */
+    default void onDelayedHit(AccessEvent event, double availabilityTime) {}
+
+    /*** The fetch of a missed key completed: admit it and evict, as the block's {@code insert} does. */
+    void insert(long key);
+
+    /*** Called once at the end of every request, after the board has handled it. */
+    default void afterRequest() {}
+
+    /***
+     * Post-access update with the missed key inserted at once rather than at the end of its fetch. The
+     * hit-ratio boards use it; the latency boards go through {@link BoardFetchStage} instead.
+     */
+    default void update(AccessEvent event) {
+        if (contains(event.key())) {
+            onHit(event);
+        } else {
+            onMiss(event);
+            insert(event.key());
+        }
+
+        afterRequest();
+    }
 
     /***
      * Receives every key this board drops: a victim it evicts, and a requested key it declines to

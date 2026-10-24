@@ -41,6 +41,7 @@ public final class RankMapClimber implements Policy {
     final private BenefitEstimatorType benefitType;
     @Nullable final private SequenceBenefitEstimator benefitEstimator;
     @Nullable final private ItemBurstCostEstimator itemEstimator;
+    @Nullable final private FetchWindowEstimator fetchWindowEstimator;
     @Nullable final private BenefitDataWriter benefitWriter;
     @Nullable final private BenefitDataReader benefitReader;
     @Nullable final private OracleScorer oracle;
@@ -60,6 +61,7 @@ public final class RankMapClimber implements Policy {
     private long requests = 0;
     private boolean intervalUsable = false;
     private long warmAt = -1;
+    private double lastRequestTime = 0d;
 
     public RankMapClimber(Config config) {
         var settings = new RankMapSettings(config);
@@ -112,7 +114,8 @@ public final class RankMapClimber implements Policy {
 
         // The per-item estimators need nothing but the request stream and the ranks, so they run the
         // same live and on a replay, and nothing of theirs is recorded.
-        this.itemEstimator = objective == AdaptationObjective.LATENCY && benefitType != BenefitEstimatorType.WINDOW
+        this.itemEstimator = objective == AdaptationObjective.LATENCY
+                             && (benefitType == BenefitEstimatorType.ITEM_CUMULATIVE || benefitType == BenefitEstimatorType.ITEM_EWMA)
                              ? new ItemBurstCostEstimator(config, benefitType, capacity)
                              : null;
 
@@ -124,6 +127,12 @@ public final class RankMapClimber implements Policy {
                                        "The decision interval %d is not a multiple of the benefit flush interval %d",
                                        decisionInterval,
                                        benefitFlushInterval));
+
+        // Like the per-item estimators, it needs only the request stream and the ranks, so it runs the
+        // same live and on a replay.
+        this.fetchWindowEstimator = objective == AdaptationObjective.LATENCY && benefitType == BenefitEstimatorType.FETCH_WINDOW
+                                    ? new FetchWindowEstimator()
+                                    : null;
 
         this.oracle = settings.validateOracle() ? new OracleScorer() : null;
 
@@ -212,6 +221,7 @@ public final class RankMapClimber implements Policy {
 
     @Override
     public void record(AccessEvent event) {
+        rankSource.advanceTo(event.getRequestTime());
         final int[] ranks = rankSource.preAccessRanks(event.key());
         final boolean warm = rankSource.isWarm();
 
@@ -236,8 +246,13 @@ public final class RankMapClimber implements Policy {
             if (itemEstimator != null) {
                 creditBenefit(ranks, itemEstimator.onArrival(event));
             }
+
+            if (fetchWindowEstimator != null) {
+                fetchWindowEstimator.onArrival(event, ranks, this::creditBenefit);
+            }
         }
 
+        lastRequestTime = event.getRequestTime();
         mainPipeline.record(event);
         recordStats(event);
         rankSource.update(event);
@@ -326,6 +341,10 @@ public final class RankMapClimber implements Policy {
         // drops out and returns within one decision interval keeps its history. The sources always
         // drain, or the departures would pile up.
         rankSource.drainDepartures(itemEstimator != null ? itemEstimator::reset : key -> {});
+
+        if (fetchWindowEstimator != null && requests > 0) {
+            fetchWindowEstimator.forgetExpired(lastRequestTime);
+        }
 
         opsSinceDecision = 0;
     }

@@ -13,6 +13,12 @@ public interface RankSource {
 
     int capacity();
 
+    /***
+     * Completes every fetch due before a request at this time, as the pipeline does before serving it.
+     * Called before {@link #preAccessRanks}, so the ranks see what the cache would see.
+     */
+    default void advanceTo(double time) {}
+
     /*** The pre-access rank of the key in every board, best-first and one-based. */
     int[] preAccessRanks(long key);
 

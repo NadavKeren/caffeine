@@ -2,12 +2,15 @@ package com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeli
 
 import com.github.benmanes.caffeine.cache.simulator.DebugHelpers.Assert;
 import com.github.benmanes.caffeine.cache.simulator.policy.AccessEvent;
+import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.AdaptationObjective;
 import com.github.benmanes.caffeine.cache.simulator.policy.latency_aware.pipeline.PipelinePolicy;
 import com.typesafe.config.Config;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 
 import java.util.function.LongConsumer;
+
+import javax.annotation.Nullable;
 
 /***
  * The shadow rankings of a pipeline: one board per stage, each run at the full cache capacity.
@@ -24,6 +27,7 @@ public final class RankedPipeline implements RankSource {
     final private RankedBlock[] boards;
     final private int capacity;
     final private LongOpenHashSet departed = new LongOpenHashSet();
+    @Nullable final private BoardFetchStage[] fetching;
 
     public RankedPipeline(Config config) {
         var settings = new PipelinePolicy.PipelineSettings(config);
@@ -37,6 +41,42 @@ public final class RankedPipeline implements RankSource {
             boards[idx] = createBoard(blockSettings.type(), config);
             boards[idx].onDeparture(departed::add);
         }
+
+        this.fetching = insertsOnFetch(config) ? new BoardFetchStage[boards.length] : null;
+        if (fetching != null) {
+            for (int idx = 0; idx < boards.length; ++idx) {
+                fetching[idx] = new BoardFetchStage();
+            }
+        }
+    }
+
+    /***
+     * Whether the boards insert a missed key when its fetch completes, as the pipeline does, rather than
+     * at the miss. The latency objective needs it: there the fetch is what a request pays for, and a
+     * board that skips it credits hits during the fetch and times recency from the wrong moment.
+     * The hit-ratio boards keep inserting at the miss.
+     */
+    public static boolean insertsOnFetch(Config config) {
+        final String path = "rank-map.objective";
+        return config.hasPath(path) && AdaptationObjective.parse(config.getString(path)) == AdaptationObjective.LATENCY;
+    }
+
+    /*** Whether some board is still fetching the key. */
+    public boolean fetches(long key) {
+        return isFetching(fetching, key);
+    }
+
+    /*** Whether a board is still fetching the key, which counts as being on it. */
+    public static boolean isFetching(@Nullable BoardFetchStage[] fetching, long key) {
+        if (fetching != null) {
+            for (BoardFetchStage stage : fetching) {
+                if (stage.contains(key)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /***
@@ -102,12 +142,44 @@ public final class RankedPipeline implements RankSource {
     }
 
     @Override
+    public void advanceTo(double time) {
+        if (fetching == null) {
+            return;
+        }
+
+        for (int idx = 0; idx < boards.length; ++idx) {
+            fetching[idx].completeBefore(time, boards[idx]::insert);
+        }
+    }
+
+    @Override
     public void update(AccessEvent event) {
-        for (RankedBlock board : boards) {
+        final long key = event.key();
+
+        for (int idx = 0; idx < boards.length; ++idx) {
+            final RankedBlock board = boards[idx];
+
             // Every board performs its bookkeeping on every request, the way the pipeline lets every
             // block see every key regardless of which one holds it.
-            board.bookkeeping(event.key());
-            board.update(event);
+            board.bookkeeping(key);
+
+            if (fetching == null) {
+                board.update(event);
+                continue;
+            }
+
+            // The pipeline's order: a key being fetched is a delayed hit, a held key a hit, and anything
+            // else a miss that starts a fetch and joins the board only when the fetch completes.
+            if (fetching[idx].contains(key)) {
+                board.onDelayedHit(event, fetching[idx].availabilityTime(key));
+            } else if (board.contains(key)) {
+                board.onHit(event);
+            } else {
+                board.onMiss(event);
+                fetching[idx].add(key, event.getAvailabilityTime());
+            }
+
+            board.afterRequest();
         }
     }
 
@@ -131,7 +203,7 @@ public final class RankedPipeline implements RankSource {
         for (LongIterator iterator = departed.iterator(); iterator.hasNext(); ) {
             final long key = iterator.nextLong();
 
-            if (!onAnyBoard(key)) {
+            if (!onAnyBoard(key) && !isFetching(fetching, key)) {
                 consumer.accept(key);
             }
         }

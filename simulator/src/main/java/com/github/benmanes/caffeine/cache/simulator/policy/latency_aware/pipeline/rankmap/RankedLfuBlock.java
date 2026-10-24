@@ -97,17 +97,23 @@ public final class RankedLfuBlock implements RankedBlock {
     }
 
     @Override
-    public void update(AccessEvent event) {
+    public void onHit(AccessEvent event) {
         final long key = event.key();
 
         if (!Double.isNaN(protectedScores.get(key))) {
             refreshProtected(key);
-        } else if (!Double.isNaN(probationScores.get(key))) {
-            promoteToProtected(key);
         } else {
-            admit(key);
+            promoteToProtected(key);
         }
+    }
 
+    @Override
+    public void insert(long key) {
+        admit(key);
+    }
+
+    @Override
+    public void afterRequest() {
         validate();
     }
 

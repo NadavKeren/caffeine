@@ -14,6 +14,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.function.LongConsumer;
 
+import javax.annotation.Nullable;
+
 /***
  * Replays a recorded set of shadow rankings. No board is maintained, so the whole order-statistic
  * cost of the ranking disappears and only the depth solver and the candidate scoring remain.
@@ -33,7 +35,14 @@ public final class RankDataReader implements RankSource {
     final private long warmAt;
 
     private long[][] snapshots;
-    /*** Everything that may have left the boards since the last drain: the members then, and every key requested since. */
+    /***
+     * The boards' fetch stages, rebuilt from the ranks: a key off a board and not being fetched by it is
+     * a miss there, and stays in its fetch until the same completion time the live board uses. A
+     * recording has no other way to know that a key in no snapshot is only waiting to be inserted.
+     */
+    @Nullable final private BoardFetchStage[] fetching;
+    @Nullable private int[] lastRanks = null;
+    /*** Everything that may have left the boards since the last drain: the members and the fetches then, and every key requested since. */
     private LongOpenHashSet mayHaveDeparted = new LongOpenHashSet();
     private long requestIndex = 0;
     private boolean closed = false;
@@ -82,6 +91,22 @@ public final class RankDataReader implements RankSource {
 
         this.snapshots = new long[stageCount][];
         readSnapshots(true);
+
+        this.fetching = RankedPipeline.insertsOnFetch(config) ? new BoardFetchStage[stageCount] : null;
+        if (fetching != null) {
+            for (int stage = 0; stage < stageCount; ++stage) {
+                fetching[stage] = new BoardFetchStage();
+            }
+        }
+    }
+
+    @Override
+    public void advanceTo(double time) {
+        if (fetching != null) {
+            for (BoardFetchStage stage : fetching) {
+                stage.completeBefore(time, key -> {});
+            }
+        }
     }
 
     public int snapshotInterval() {
@@ -121,6 +146,7 @@ public final class RankDataReader implements RankSource {
             throw new UncheckedIOException("Cannot read a rank vector from " + path, e);
         }
 
+        lastRanks = ranks;
         return ranks;
     }
 
@@ -133,6 +159,15 @@ public final class RankDataReader implements RankSource {
 
     @Override
     public void update(AccessEvent event) {
+        if (fetching != null && lastRanks != null) {
+            for (int stage = 0; stage < stageCount; ++stage) {
+                if (lastRanks[stage] > capacity && !fetching[stage].contains(event.key())) {
+                    fetching[stage].add(event.key(), event.getAvailabilityTime());
+                }
+            }
+        }
+        lastRanks = null;
+
         ++requestIndex;
 
         if (requestIndex % snapshotInterval == 0) {
@@ -185,11 +220,18 @@ public final class RankDataReader implements RankSource {
         for (LongIterator iterator = mayHaveDeparted.iterator(); iterator.hasNext(); ) {
             final long key = iterator.nextLong();
 
-            if (!members.contains(key)) {
+            if (!members.contains(key) && !RankedPipeline.isFetching(fetching, key)) {
                 consumer.accept(key);
             }
         }
 
+        // A key still being fetched is on no snapshot yet, and may join a board and leave it again
+        // before the next drain without being requested, so it stays a candidate as well.
+        if (fetching != null) {
+            for (BoardFetchStage stage : fetching) {
+                stage.forEachKey(members::add);
+            }
+        }
         mayHaveDeparted = members;
     }
 

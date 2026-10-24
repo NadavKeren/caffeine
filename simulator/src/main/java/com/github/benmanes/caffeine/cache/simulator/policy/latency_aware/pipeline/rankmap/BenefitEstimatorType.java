@@ -11,13 +11,20 @@ public enum BenefitEstimatorType {
     /*** {@link ItemBurstCostEstimator}: the item's cost per burst request over everything since it entered the boards. */
     ITEM_CUMULATIVE,
     /*** {@link ItemBurstCostEstimator}: a moving average of the item's cost per burst request, window by window. */
-    ITEM_EWMA;
+    ITEM_EWMA,
+    /***
+     * {@link FetchWindowEstimator}: one virtual fetch per window, every request in it credited to the
+     * ranks the window opened with - the miss penalty for the first, what is left of the fetch for the
+     * rest.
+     */
+    FETCH_WINDOW;
 
     public static BenefitEstimatorType parse(String value) {
         return switch (value.trim().toLowerCase(Locale.US)) {
             case "window" -> WINDOW;
             case "item-cumulative" -> ITEM_CUMULATIVE;
             case "item-ewma" -> ITEM_EWMA;
+            case "fetch-window" -> FETCH_WINDOW;
             default -> throw new IllegalArgumentException("No such benefit estimator: " + value);
         };
     }

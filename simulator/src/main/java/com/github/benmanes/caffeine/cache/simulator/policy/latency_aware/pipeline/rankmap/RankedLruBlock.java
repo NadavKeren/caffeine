@@ -58,23 +58,32 @@ public final class RankedLruBlock implements RankedBlock {
     }
 
     @Override
-    public void update(AccessEvent event) {
+    public void onHit(AccessEvent event) {
         final long key = event.key();
-        final double previous = scores.get(key);
+        order.remove(new ScoredKey(scores.get(key), key));
+        store(key);
+    }
 
-        if (!Double.isNaN(previous)) {
-            order.remove(new ScoredKey(previous, key));
-        } else if (order.size() >= capacity) {
+    @Override
+    public void insert(long key) {
+        if (order.size() >= capacity) {
             ScoredKey victim = order.min();
             order.remove(victim);
             scores.remove(victim.key());
             departures.accept(victim.key());
         }
 
+        store(key);
+    }
+
+    private void store(long key) {
         final double score = ++opCounter;
         scores.put(key, score);
         order.add(new ScoredKey(score, key));
+    }
 
+    @Override
+    public void afterRequest() {
         Assert.assertCondition(order.size() == scores.size(), "LRU board: order and score map diverged");
         Assert.assertCondition(order.size() <= capacity, "LRU board: capacity overflow");
     }

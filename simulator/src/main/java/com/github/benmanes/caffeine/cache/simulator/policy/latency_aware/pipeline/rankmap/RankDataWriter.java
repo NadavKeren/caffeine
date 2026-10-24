@@ -87,6 +87,11 @@ public final class RankDataWriter implements RankSource {
     }
 
     @Override
+    public void advanceTo(double time) {
+        boards.advanceTo(time);
+    }
+
+    @Override
     public int[] preAccessRanks(long key) {
         int[] ranks = boards.preAccessRanks(key);
 

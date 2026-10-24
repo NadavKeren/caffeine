@@ -106,6 +106,10 @@ public final class RankDataFormat {
         description.append(";lfu-probation=").append(RankedPipeline.lfuProbationSize(config));
         description.append(";sketch=").append(config.getString("tiny-lfu.sketch"))
                    .append(',').append(config.getString("tiny-lfu.count-min-4.reset"));
+        // Appended only when set, so the recordings made with insertion at the miss keep their names.
+        if (RankedPipeline.insertsOnFetch(config)) {
+            description.append(";insertion=on-fetch");
+        }
         description.append(";trace=").append(traceDescription(basic));
 
         return description.toString();

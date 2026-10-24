@@ -30,6 +30,8 @@ public final class RankedLaLfuBlock implements RankedBlock {
     final private OrderStatisticTree<ScoredKey> order = new OrderStatisticTree<>(ScoredKey.ORDER);
     final private Long2DoubleMap scores;
     final private Long2DoubleMap latencies;
+    /*** The latency of each missed key between its miss and its insertion. */
+    final private Long2DoubleMap fetchLatencies = new Long2DoubleOpenHashMap();
 
     private LongConsumer departures = key -> {};
     private int resetsSeen = 0;
@@ -91,16 +93,25 @@ public final class RankedLaLfuBlock implements RankedBlock {
     }
 
     @Override
-    public void update(AccessEvent event) {
+    public void onHit(AccessEvent event) {
         final long key = event.key();
+        order.remove(new ScoredKey(scores.get(key), key));
+        store(key);
+    }
 
-        if (contains(key)) {
-            order.remove(new ScoredKey(scores.get(key), key));
-            store(key);
-        } else {
-            admit(key, event.missPenalty() - event.hitPenalty());
-        }
+    /*** The latency comes from the miss, but the key is scored only when its fetch completes. */
+    @Override
+    public void onMiss(AccessEvent event) {
+        fetchLatencies.put(event.key(), event.missPenalty() - event.hitPenalty());
+    }
 
+    @Override
+    public void insert(long key) {
+        admit(key, fetchLatencies.remove(key));
+    }
+
+    @Override
+    public void afterRequest() {
         Assert.assertCondition(order.size() == scores.size(), "LA-LFU board: order and score map diverged");
         Assert.assertCondition(order.size() <= capacity, "LA-LFU board: capacity overflow");
     }
